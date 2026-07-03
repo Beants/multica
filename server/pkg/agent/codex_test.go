@@ -1654,7 +1654,6 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 	}
 }
 
-
 func TestCodexExecuteSurfacesUnsupportedServerRequestOnInterruptedTurn(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -2243,6 +2242,14 @@ func TestEnsureCodexMcpConfigWritesManagedBlock(t *testing.T) {
 			t.Fatalf("expected %q in:\n%s", want, got)
 		}
 	}
+	for _, unexpected := range []string{
+		`experimental_use_rmcp_client`,
+		`http_headers`,
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("stdio servers should not get remote MCP key %q, got:\n%s", unexpected, got)
+		}
+	}
 
 	fi, err := os.Stat(tmp)
 	if err != nil {
@@ -2250,6 +2257,65 @@ func TestEnsureCodexMcpConfigWritesManagedBlock(t *testing.T) {
 	}
 	if mode := fi.Mode().Perm(); mode != 0o600 {
 		t.Fatalf("expected mode 0o600 for secret-bearing config, got %o", mode)
+	}
+}
+
+func TestEnsureCodexMcpConfigTranslatesRemoteHTTPServer(t *testing.T) {
+	t.Parallel()
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tmp, []byte("sandbox_mode = \"workspace-write\"\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	raw := json.RawMessage(`{"mcpServers":{"composio":{"type":"http","url":"https://mcp.example.test/notion","headers":{"Authorization":"Bearer test-token","x-api-key":"secret"}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+
+	for _, want := range []string{
+		`[mcp_servers.composio]`,
+		`url = "https://mcp.example.test/notion"`,
+		`http_headers = { Authorization = "Bearer test-token", x-api-key = "secret" }`,
+		`experimental_use_rmcp_client = true`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in:\n%s", want, got)
+		}
+	}
+	for _, unexpected := range []string{
+		`type = "http"`,
+		"\nheaders = ",
+	} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("remote HTTP server should not render %q, got:\n%s", unexpected, got)
+		}
+	}
+}
+
+func TestRenderCodexMcpServersBlockTreatsURLOnlyServerAsRemote(t *testing.T) {
+	t.Parallel()
+
+	block, hasServers, err := renderCodexMcpServersBlock(json.RawMessage(`{"mcpServers":{"remote":{"url":"https://mcp.example.test/session"}}}`))
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !hasServers {
+		t.Fatal("expected server to render")
+	}
+	for _, want := range []string{
+		`[mcp_servers.remote]`,
+		`url = "https://mcp.example.test/session"`,
+		`experimental_use_rmcp_client = true`,
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("expected %q in:\n%s", want, block)
+		}
 	}
 }
 

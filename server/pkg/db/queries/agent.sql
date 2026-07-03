@@ -20,11 +20,24 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config, model, thinking_level
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+    instructions, custom_env, custom_args, mcp_config, model, thinking_level,
+    composio_toolkit_allowlist, permission_mode
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9, $10,
+    $11, $12, $13, $14, $15, $16,
+    sqlc.narg('composio_toolkit_allowlist')::text[],
+    COALESCE(sqlc.narg('permission_mode'), 'private')
+)
 RETURNING *;
 
 -- name: UpdateAgent :one
+-- composio_toolkit_allowlist is set wholesale: the API layer is responsible
+-- for normalising the request payload to either (a) the new slug list — sent
+-- here verbatim — or (b) an empty array to explicitly disable Composio.
+-- Distinguish "field omitted" (preserve) from "explicit clear" via
+-- ClearAgentComposioToolkitAllowlist below, mirroring the
+-- thinking_level / mcp_config two-query pattern: COALESCE can't restore NULL.
 UPDATE agent SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
@@ -33,6 +46,7 @@ UPDATE agent SET
     runtime_mode = COALESCE(sqlc.narg('runtime_mode'), runtime_mode),
     runtime_id = COALESCE(sqlc.narg('runtime_id'), runtime_id),
     visibility = COALESCE(sqlc.narg('visibility'), visibility),
+    permission_mode = COALESCE(sqlc.narg('permission_mode'), permission_mode),
     status = COALESCE(sqlc.narg('status'), status),
     max_concurrent_tasks = COALESCE(sqlc.narg('max_concurrent_tasks'), max_concurrent_tasks),
     instructions = COALESCE(sqlc.narg('instructions'), instructions),
@@ -41,7 +55,19 @@ UPDATE agent SET
     mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
     model = COALESCE(sqlc.narg('model'), model),
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
+    composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
     updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentComposioToolkitAllowlist :one
+-- Explicit NULL-clear for composio_toolkit_allowlist. The COALESCE-based
+-- UpdateAgent cannot set the column back to NULL — sending an empty array
+-- through there would persist `{}` (still a non-NULL, equivalent to "no
+-- toolkits" but distinct from "field never configured"). The API uses this
+-- dedicated query when the agent owner removes every toolkit; subsequent
+-- dispatch decisions treat NULL identically to `{}` (both -> no overlay).
+UPDATE agent SET composio_toolkit_allowlist = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -144,7 +170,7 @@ ORDER BY created_at DESC;
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id, context
+    squad_id, context, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
@@ -157,7 +183,10 @@ VALUES (
         WHEN COALESCE(sqlc.narg('head_sha')::text, '') <> ''
         THEN jsonb_build_object('head_sha', sqlc.narg('head_sha')::text)
         ELSE NULL
-    END
+    END,
+    sqlc.narg(originator_user_id),
+    sqlc.narg(runtime_mcp_overlay),
+    sqlc.narg(runtime_connected_apps)
 )
 RETURNING *;
 
@@ -165,8 +194,16 @@ RETURNING *;
 -- Quick-create tasks have no issue / chat / autopilot link; the entire job
 -- description (prompt, requester, workspace) lives in context JSONB. The
 -- daemon detects this variant via context.type == "quick_create".
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
-VALUES ($1, $2, NULL, 'queued', $3, $4)
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
+    runtime_mcp_overlay, runtime_connected_apps
+)
+VALUES (
+    $1, $2, NULL, 'queued', $3, $4,
+    sqlc.narg(originator_user_id),
+    sqlc.narg(runtime_mcp_overlay),
+    sqlc.narg(runtime_connected_apps)
+)
 RETURNING *;
 
 -- name: CreateDeferredAgentTask :one
@@ -210,12 +247,18 @@ WHERE id = $1 AND issue_id IS NULL;
 -- parent and the self-trigger guard in shouldEnqueueSquadLeaderOnComment
 -- continues to recognise it as a leader task. Inheriting squad_id also keeps
 -- the squad-leader briefing injection working across retries.
+--
+-- originator_user_id is inherited so the Composio overlay decision sees the
+-- same top-of-chain human across the retry: the user behind the original
+-- run has not changed. The Composio overlay follows the agent's invocation
+-- permission and uses the agent owner's connection (MUL-3963); originator is
+-- carried for A2A/audit, not as an originator == agent.owner_id gate.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id
+    squad_id, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -225,7 +268,10 @@ SELECT
     p.attempt + 1, p.max_attempts, p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
     p.is_leader_task,
-    p.squad_id
+    p.squad_id,
+    p.originator_user_id,
+    sqlc.narg(runtime_mcp_overlay),
+    sqlc.narg(runtime_connected_apps)
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;
