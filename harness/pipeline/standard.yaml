@@ -1,0 +1,68 @@
+# Standard Pipeline — 6 stages, 2 human gates
+#
+# Usage: Leader reads this to know which stages to create and in what order.
+# Each stage has one role slot. The gate-runner stages run scripts.
+
+pipeline:
+  name: standard
+  description: "Full pipeline: plan → gate → implement → gate → review → accept"
+
+  stages:
+    - id: 1
+      name: Plan
+      role: planner
+      initial_status: todo
+      produces: [prd.md, design.md, business-test-cases.md]
+
+    - id: 2
+      name: Plan Gate
+      role: gate-runner
+      initial_status: backlog
+      gate:
+        type: script
+        script: plan_contract_check.py
+        hard: true
+        on_fail: rework stage 1
+
+    - id: 3
+      name: Implement
+      role: implementer
+      initial_status: backlog
+      produces: [code, tech-test-cases.md, baseline/after.json]
+
+    - id: 4
+      name: Baseline Gate
+      role: gate-runner
+      initial_status: backlog
+      gate:
+        type: script
+        script: baseline.py diff
+        hard: true
+        on_fail: rework stage 3
+
+    - id: 5
+      name: Review
+      role: reviewer
+      initial_status: backlog
+      produces: [review-verdict.yaml]
+      gate:
+        type: soft
+        hard: false
+        on_fail: record findings, continue
+
+    - id: 6
+      name: Acceptance
+      role: human
+      initial_status: backlog
+
+  human_gates:
+    - after_stage: 1
+      name: Spec Freeze
+      description: "Human reviews prd.md + business-test-cases.md"
+    - at_stage: 6
+      name: Final Acceptance
+      description: "Human verifies all test cases pass"
+
+  circuit_breaker:
+    threshold: 3
+    action: assign parent to human

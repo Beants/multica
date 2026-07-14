@@ -1,0 +1,52 @@
+# Bugfix Pipeline — 4 stages, human gate optional
+#
+# Shorter circuit for bug fixes: skip separate plan gate, merge review
+# into baseline, auto-accept simple fixes.
+
+pipeline:
+  name: bugfix
+  description: "Short pipeline: plan → implement+baseline → review → accept"
+
+  stages:
+    - id: 1
+      name: Plan (lite)
+      role: planner
+      initial_status: todo
+      produces: [prd.md, business-test-cases.md]
+      # No separate design.md for simple fixes
+
+    - id: 2
+      name: Implement + Baseline
+      role: implementer
+      initial_status: backlog
+      produces: [code, tech-test-cases.md, baseline/after.json]
+      gate:
+        type: script
+        script: baseline.py diff
+        hard: true
+        on_fail: rework stage 2
+
+    - id: 3
+      name: Review (soft)
+      role: reviewer
+      initial_status: backlog
+      produces: [review-verdict.yaml]
+      gate:
+        type: soft
+        hard: false
+
+    - id: 4
+      name: Acceptance
+      role: human
+      initial_status: backlog
+      auto_pass: true  # auto-mark done if review APPROVED and baseline clean
+
+  human_gates:
+    - at_stage: 4
+      name: Acceptance
+      description: "Human verifies fix"
+      auto_pass_condition: "review verdict == APPROVED and baseline diff blocking == false"
+
+  circuit_breaker:
+    threshold: 3
+    action: assign parent to human
