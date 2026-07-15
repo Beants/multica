@@ -162,6 +162,20 @@ def resolve_task_dir(
     if not task_input:
         raise FileNotFoundError("Empty task identifier.")
 
+    # Workdir pass-through: if task_input names an existing directory (absolute,
+    # or relative to CWD), use it directly. This lets the gates run against a
+    # Multica local_directory workdir that has no .trellis/tasks/ layout and no
+    # task.json. A bare name (no path separator, no leading dot) still falls
+    # through to the Trellis name resolution below, so existing Trellis usage
+    # is unchanged.
+    norm = task_input.replace("\\", "/")
+    looks_like_path = "/" in norm or norm.startswith(".") or Path(task_input).is_absolute()
+    if looks_like_path:
+        cand = Path(task_input)
+        cand = cand.resolve() if cand.is_absolute() else (Path.cwd() / task_input).resolve()
+        if cand.is_dir():
+            return cand
+
     if tasks_dir is None:
         tasks_dir = _detect_tasks_dir()
 

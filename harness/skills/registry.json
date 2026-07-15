@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "_doc": "外部 skill 扒取清单。cli/sync_skills.py 按此从上游 repo 同步到 skills/<role>/<name>/。不自编方法论——复用社区验证过的 skill（对标 Multica 根目录 skills-lock.json 的锁定范式，但本文件归属 harness，可自行维护）。pinned/hash 字段由 sync 脚本维护；check 模式对比 pinned 与上游 HEAD 报告新鲜度。",
+  "skills": [
+    {
+      "name": "brainstorming",
+      "repo": "obra/superpowers",
+      "ref": "trunk",
+      "role": "planner",
+      "files": [
+        "skills/brainstorming/SKILL.md"
+      ],
+      "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+      "last_synced": "2026-07-15T10:01:49Z",
+      "multica_id": "3a4c949b-5b76-4d83-b048-18bd7e3fcfe7"
+    },
+    {
+      "name": "writing-plans",
+      "repo": "obra/superpowers",
+      "ref": "trunk",
+      "role": "planner",
+      "files": [
+        "skills/writing-plans/SKILL.md"
+      ],
+      "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+      "last_synced": "2026-07-15T10:01:56Z",
+      "multica_id": "285485c8-145d-415d-8921-7913b66910e4"
+    },
+    {
+      "name": "test-driven-development",
+      "repo": "obra/superpowers",
+      "ref": "trunk",
+      "role": "implementer",
+      "files": [
+        "skills/test-driven-development/SKILL.md",
+        "skills/test-driven-development/testing-anti-patterns.md"
+      ],
+      "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+      "last_synced": "2026-07-15T10:02:05Z",
+      "multica_id": "4f39bcb8-fa31-4ed1-81ad-65b0b6e0bdf3"
+    },
+    {
+      "name": "executing-plans",
+      "repo": "obra/superpowers",
+      "ref": "trunk",
+      "role": "implementer",
+      "files": [
+        "skills/executing-plans/SKILL.md"
+      ],
+      "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+      "last_synced": "2026-07-15T10:02:15Z",
+      "multica_id": "89f66965-8fcf-4314-bf19-ed4d4f517101"
+    },
+    {
+      "name": "requesting-code-review",
+      "repo": "obra/superpowers",
+      "ref": "trunk",
+      "role": "reviewer",
+      "files": [
+        "skills/requesting-code-review/SKILL.md"
+      ],
+      "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+      "last_synced": "2026-07-15T10:02:22Z",
+      "multica_id": "36a0e938-8a50-4e9c-b79f-b0c1873afd6a"
+    },
+    {
+      "name": "receiving-code-review",
+      "repo": "obra/superpowers",
+      "ref": "trunk",
+      "role": "implementer",
+      "files": [
+        "skills/receiving-code-review/SKILL.md"
+      ],
+      "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+      "last_synced": "2026-07-15T10:02:31Z",
+      "multica_id": "b2a3c7aa-3ac3-4803-b8d6-dd1c49edef8e"
+    },
+    {
+      "name": "systematic-debugging",
+      "repo": "obra/superpowers",
+      "ref": "trunk",
+      "role": "reviewer",
+      "files": [
+        "skills/systematic-debugging/SKILL.md"
+      ],
+      "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+      "last_synced": "2026-07-15T10:02:39Z",
+      "multica_id": "44098b6c-1b2c-4894-b0a2-4771ff48a2d8"
+    },
+    {
+      "name": "verification-before-completion",
+      "repo": "obra/superpowers",
+      "ref": "trunk",
+      "role": "gate-runner",
+      "files": [
+        "skills/verification-before-completion/SKILL.md"
+      ],
+      "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+      "last_synced": "2026-07-15T10:02:46Z",
+      "multica_id": "05be5238-70ce-40ce-ba99-4cfc432f349d"
+    }
+  ]
+}

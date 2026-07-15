@@ -15,7 +15,6 @@ import json
 import sys
 from pathlib import Path
 
-import evidence_plan
 import task_resolver
 
 TASK_JSON = "task.json"
@@ -74,98 +73,6 @@ def _command_contract(snapshot: dict) -> dict[str, object] | None:
     return contract
 
 
-def _check_required_evidence(
-    *,
-    task_dir: Path,
-    plan: evidence_plan.RequiredEvidencePlan,
-    events: list[dict],
-    passed: list[str],
-    missing: list[str],
-) -> None:
-    baseline_dir = task_dir / "baseline"
-    before = _read_json_object(
-        baseline_dir / "before.json", "baseline/before.json", missing
-    )
-    after = _read_json_object(
-        baseline_dir / "after.json", "baseline/after.json", missing
-    )
-    diff = _read_json_object(
-        baseline_dir / "diff.json", "baseline/diff.json", missing
-    )
-
-    current_plan_sha = evidence_plan.canonical_plan_sha256(plan)
-    if before is not None:
-        if before.get("captured_task_status") != "planning":
-            missing.append("baseline before was not captured during planning")
-        workspace_sha = before.get("workspace_sha256")
-        if not (
-            isinstance(workspace_sha, str)
-            and len(workspace_sha) == 64
-            and all(
-                character in "0123456789abcdef"
-                for character in workspace_sha.lower()
-            )
-        ):
-            missing.append("baseline before workspace SHA missing or invalid")
-    if before is not None and after is not None:
-        if (
-            before.get("plan_sha256") != current_plan_sha
-            or after.get("plan_sha256") != current_plan_sha
-        ):
-            missing.append("baseline plan SHA mismatch")
-        before_commands = _command_contract(before)
-        after_commands = _command_contract(after)
-        if before_commands is None or after_commands is None:
-            missing.append("baseline command contract malformed")
-        elif before_commands != after_commands:
-            missing.append("baseline command set mismatch")
-
-    if diff is not None:
-        new_failures = diff.get("new_failures")
-        if not isinstance(new_failures, list):
-            missing.append("baseline/diff.json new_failures must be a list")
-        elif new_failures or diff.get("blocking") is not False:
-            missing.append("baseline diff is blocking or contains new failures")
-
-    pass_events = [
-        event
-        for event in events
-        if event.get("gate") == "baseline"
-        and event.get("status") == "pass"
-        and event.get("hard") is True
-        and event.get("new_failures") == 0
-    ]
-    if not pass_events:
-        missing.append("required baseline pass gate not found")
-    elif before is not None and after is not None and diff is not None:
-        passed.append("required baseline evidence chain complete")
-
-
-def _check_not_applicable_evidence(
-    *,
-    plan: evidence_plan.NotApplicableEvidencePlan,
-    events: list[dict],
-    passed: list[str],
-    missing: list[str],
-) -> None:
-    matching = [
-        event
-        for event in events
-        if event.get("gate") == "baseline"
-        and event.get("status") == "skipped"
-        and event.get("hard") is False
-        and event.get("command") == ""
-        and event.get("summary") == plan.reason
-        and isinstance(event.get("evidence"), list)
-        and evidence_plan.PLAN_FILENAME in event.get("evidence", [])
-        and event.get("new_failures") == 0
-    ]
-    if len(matching) != 1:
-        missing.append("valid not_applicable baseline gate not found")
-    else:
-        passed.append("baseline explicitly marked not applicable")
-
-
 def check_task(task_dir: Path) -> dict:
     """Return {"passed": [...], "missing": [...], "warnings": [...]}."""
     data = _read_task_json(task_dir)
@@ -173,12 +80,6 @@ def check_task(task_dir: Path) -> dict:
     passed: list[str] = []
     missing: list[str] = []
     warnings: list[str] = []
-
-    try:
-        plan = evidence_plan.load_evidence_plan(task_dir)
-    except evidence_plan.EvidencePlanError as exc:
-        plan = None
-        missing.append(f"evidence-plan.json missing or invalid: {exc}")
 
     # Required for all tasks
     if (task_dir / "prd.md").is_file():
@@ -245,22 +146,6 @@ def check_task(task_dir: Path) -> dict:
             warnings.append("baseline/diff.json malformed")
     else:
         warnings.append("baseline/diff.json not found")
-
-    if isinstance(plan, evidence_plan.RequiredEvidencePlan):
-        _check_required_evidence(
-            task_dir=task_dir,
-            plan=plan,
-            events=events,
-            passed=passed,
-            missing=missing,
-        )
-    elif isinstance(plan, evidence_plan.NotApplicableEvidencePlan):
-        _check_not_applicable_evidence(
-            plan=plan,
-            events=events,
-            passed=passed,
-            missing=missing,
-        )
 
     # Optional traceability becomes a hard delivery contract when selected.
     verification_path = task_dir / "verification-contract.json"

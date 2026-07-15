@@ -1,0 +1,12 @@
+{
+  "repo": "obra/superpowers",
+  "ref": "trunk",
+  "commit": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+  "files": [
+    {
+      "path": "skills/receiving-code-review/SKILL.md",
+      "hash": "647036bbdab7bf2317e14e079595e984c9030f64295e2b4c0fb57dbeb48f25dd"
+    }
+  ],
+  "fetched_at": "2026-07-15T10:02:31Z"
+}

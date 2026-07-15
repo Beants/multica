@@ -1,0 +1,12 @@
+{
+  "repo": "obra/superpowers",
+  "ref": "trunk",
+  "commit": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+  "files": [
+    {
+      "path": "skills/brainstorming/SKILL.md",
+      "hash": "e14914605f640e0841758e45d0ab2a53243b59b921f929e47921c99668f2e61d"
+    }
+  ],
+  "fetched_at": "2026-07-15T10:01:49Z"
+}

@@ -3,6 +3,14 @@
 > **目的**：配合 Trellis 进行 AI 原生开发的项目级工程指南。AI 在写代码前先读
 > 这些，从而在项目的契约内工作，而不是自己发明。
 
+> **定位（双层）**：本目录的指南属于**任务执行层**——单个 task workdir 内的行为
+> 契约（executor 协议、证据 schema、baseline / gate-result 协议）。它与
+> `../squad-briefing.md` 的**流水线编排层**（parent/child issue、stage 屏障、跨
+> 阶段状态）正交配合：流水线层管"推进到哪一步"，本层管"这一步怎么做对"。证据
+> 文件（`gate-result.jsonl`、`baseline/`、`task.json`）由本层脚本产出，是门禁
+> 执行器与队长的判定依据。脚本已兼容非 `.trellis` 的 Multica workdir（传入目录
+> 路径即可，见 `task_resolver.py` 的 workdir 直通分支）。
+
 ## 可用指南
 
 | 指南 | 用途 | AI 何时读 |

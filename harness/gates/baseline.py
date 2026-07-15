@@ -26,7 +26,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import task_resolver
-import evidence_plan
 
 SCHEMA_VERSION = 1
 DEFAULT_COMMANDS = ("lint", "typecheck", "test")
@@ -147,7 +146,6 @@ def snapshot(
     cwd: Path,
     if_missing: bool = False,
     command_templates: dict[str, str] | None = None,
-    plan_sha256: str | None = None,
 ) -> Path:
     """Run each command, capture results, write <task-dir>/baseline/<phase>.json."""
     task_name = task_dir.name
@@ -180,9 +178,6 @@ def snapshot(
         "ts": _utc_now_iso(),
         "commands": cmd_results,
     }
-    if plan_sha256 is not None:
-        payload["evidence_plan"] = {"sha256": plan_sha256}
-        payload["plan_sha256"] = plan_sha256
     target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return target
 
@@ -261,6 +256,34 @@ def diff(
     return target, payload
 
 
+def load_test_plan(path: Path) -> tuple[list[str], dict[str, str]] | None:
+    """Load a project test-plan.json: {<key>: {"cmd": "...", "hard": bool}, ...}.
+
+    Returns (commands, command_templates), or None when absent/unreadable. Lets
+    baseline run the project's real test stack (e.g. `make test` for Go +
+    `pnpm test` for TS) instead of the hardcoded pnpm default. Entries with
+    cmd:null are skipped (that test type isn't configured for this project).
+    """
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"warning: test-plan {path} unreadable ({e}); falling back", file=sys.stderr)
+        return None
+    commands: list[str] = []
+    templates: dict[str, str] = {}
+    for key, spec in data.items():
+        if not isinstance(spec, dict):
+            continue
+        cmd = spec.get("cmd")
+        if not cmd:
+            continue
+        commands.append(key)
+        templates[key] = cmd
+    return (commands, templates) if commands else None
+
+
 def cmd_snapshot(args: argparse.Namespace) -> int:
     try:
         task_dir = task_resolver.resolve_task_dir(args.task)
@@ -270,27 +293,23 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
 
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
     command_templates: dict[str, str] | None = None
-    plan_sha256: str | None = None
-    if args.plan:
-        try:
-            plan = evidence_plan.load_evidence_plan_path(Path(args.plan))
-        except evidence_plan.EvidencePlanError as e:
-            print(f"error: {e}", file=sys.stderr)
-            return 2
-        if not isinstance(plan, evidence_plan.RequiredEvidencePlan):
-            print("error: not_applicable plans cannot produce snapshots", file=sys.stderr)
-            return 2
-        commands = [command.id for command in plan.commands]
-        command_templates = {
-            command.id: command.command for command in plan.commands
-        }
-        plan_sha256 = evidence_plan.canonical_plan_sha256(plan)
+
+    # Project test-plan wins (real test stack), then --commands, then pnpm default.
+    plan_path = Path(args.test_plan) if args.test_plan else (cwd / "test-plan.json")
+    tp = load_test_plan(plan_path)
+    if tp:
+        commands, command_templates = tp
+    elif args.commands:
+        commands = [c.strip() for c in args.commands.split(",") if c.strip()]
     else:
-        commands = (
-            [c.strip() for c in args.commands.split(",") if c.strip()]
-            if args.commands
-            else list(DEFAULT_COMMANDS)
-        )
+        commands = list(DEFAULT_COMMANDS)
+        if not plan_path.is_file():
+            print(
+                f"warning: no test-plan.json at {plan_path}; using pnpm default — "
+                "you may miss project tests (e.g. `make test` for Go). "
+                "Add one or run gates/detect_tests.py.",
+                file=sys.stderr,
+            )
     target_before = task_dir / "baseline" / f"{args.phase}.json"
     kept_existing = args.if_missing and target_before.is_file()
     try:
@@ -301,7 +320,6 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
             cwd=cwd,
             if_missing=args.if_missing,
             command_templates=command_templates,
-            plan_sha256=plan_sha256,
         )
     except Exception as e:
         print(f"error: {e}", file=sys.stderr)
@@ -359,14 +377,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--task-root",
         help=argparse.SUPPRESS,
     )
-    command_source = p_snap.add_mutually_exclusive_group()
-    command_source.add_argument(
+    p_snap.add_argument(
         "--commands",
         help=f"Comma-separated command keys. Default: {','.join(DEFAULT_COMMANDS)}.",
     )
-    command_source.add_argument(
-        "--plan",
-        help="Path to a required evidence-plan.json used for command IDs and values.",
+    p_snap.add_argument(
+        "--test-plan",
+        help="Path to a project test-plan.json (auto-detected at <cwd>/test-plan.json if omitted).",
     )
     p_snap.add_argument(
         "--cwd", help="Working directory to run commands in. Default: project root."

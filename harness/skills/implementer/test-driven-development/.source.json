@@ -1,0 +1,16 @@
+{
+  "repo": "obra/superpowers",
+  "ref": "trunk",
+  "commit": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+  "files": [
+    {
+      "path": "skills/test-driven-development/SKILL.md",
+      "hash": "b5b4717b8b761cce15a6cfe9022e33fd959e0894c0c39d72c9cb49c23486c10e"
+    },
+    {
+      "path": "skills/test-driven-development/testing-anti-patterns.md",
+      "hash": "bde453bc258f06543987477c837939afaa774ea2acbd9f308d702fc452bc4283"
+    }
+  ],
+  "fetched_at": "2026-07-15T10:02:05Z"
+}
