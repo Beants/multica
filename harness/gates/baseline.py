@@ -310,6 +310,20 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
                 "Add one or run gates/detect_tests.py.",
                 file=sys.stderr,
             )
+
+    # Drop keys gated elsewhere (e.g. 'api' is gated by api_gate.py at stage 5,
+    # so the baseline diff at stage 4 must not also run/re diffs it).
+    if args.exclude:
+        excluded = {c.strip() for c in args.exclude.split(",") if c.strip()}
+        if excluded:
+            commands = [c for c in commands if c not in excluded]
+            if command_templates is not None:
+                command_templates = {
+                    k: v for k, v in command_templates.items() if k not in excluded
+                }
+            if not commands:
+                print("error: --exclude removed every command", file=sys.stderr)
+                return 2
     target_before = task_dir / "baseline" / f"{args.phase}.json"
     kept_existing = args.if_missing and target_before.is_file()
     try:
@@ -384,6 +398,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_snap.add_argument(
         "--test-plan",
         help="Path to a project test-plan.json (auto-detected at <cwd>/test-plan.json if omitted).",
+    )
+    p_snap.add_argument(
+        "--exclude",
+        help="Comma-separated command keys to skip (e.g. 'api' when api is gated separately by api_gate.py).",
     )
     p_snap.add_argument(
         "--cwd", help="Working directory to run commands in. Default: project root."

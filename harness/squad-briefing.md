@@ -20,29 +20,35 @@
 
 一个需求 = 一个 parent issue。队长用 `issue create --parent --stage` 创建分阶段 child issue；Multica 的 stage 屏障在该 stage 所有 child 进入终态时**自动唤醒** parent（确定性，不靠 leader 轮询）。
 
-### 标准流水线（7 阶段 + 2 个人工关卡）
+### 标准流水线（7 阶段 + Spec Freeze 人工暂停）
 
 | 阶段 | assignee | 门禁 | 产出物 |
 |---|---|---|---|
 | 1 规划 | 规划员 | — | prd.md, design.md, business-test-cases.md |
-| 2 规划门禁 | 门禁执行器 | plan_contract_check.py（硬） | verdict |
-| ★ Spec Freeze | 人类 | 评审 prd + business-test-cases | 冻结确认 |
-| 3 实现 | 实现员 | — | 代码, tech-test-cases.md, baseline/after.json |
-| 4 基线门禁 | 门禁执行器 | baseline.py diff（硬） | baseline/diff.json |
-| 5 API 测试 | 门禁执行器 | test-plan.json 的 api 命令（硬） | gate-result |
+| 2 规划门禁 | 门禁执行器 | plan_contract_check.py（硬）+ `baseline.py snapshot --phase before --exclude api`（冻结已知失败基线） | verdict, baseline/before.json |
+| ★ Spec Freeze | 人类（暂停，非编号 stage） | 评审 prd + business-test-cases | `frozen_spec=true` |
+| 3 实现 | 实现员 | — | 代码, tech-test-cases.md（**不碰 baseline 脚本**） |
+| 4 基线门禁 | 门禁执行器 | `baseline.py snapshot --phase after --exclude api` + `diff`（硬）—只跑 unit/integration/lint/typecheck | baseline/{after,diff}.json |
+| 5 API/接口门禁 | 门禁执行器 | `api_gate.py snapshot --phase after` + `diff`（硬）—只跑 test-plan 的 `api` 键；无 api 键则 SKIP | baseline/api-{after,diff}.json |
 | 6 代码审查 | 代码审查员 | soft gate（不阻断） | review-verdict.yaml |
 | 7 验收 | 人类 | 验收 | done / 驳回 |
 
+> **★ Spec Freeze 不是 `--stage`。** Multica 的 `--stage` 是整数（`issue.stage` Int32），没有 2.5。Spec Freeze 的平台原生落法：阶段 2 闭合后，队长把 **parent 的 assignee 改给人类 member** → 平台停止自动唤醒（member assignee 不触发 child-done 唤醒）→ 人评审 prd/business-test-cases → 设 `frozen_spec`(--type bool)+`frozen_test_cases` → 把 assignee 改回队长 agent → 队长被唤醒推进阶段 3。不建 child issue、不占 stage 编号。
+>
+> **为什么 baseline 要 `--exclude api`、api 单独一个门禁**：`baseline.py` 一次跑完 test-plan 所有命令，若不排除 api，阶段 4 和阶段 5 会重复跑同一批 api 测试。拆开后阶段 4 的 `diff.json` 只反映 unit/integration 的新增失败，阶段 5 的 `api-diff.json` 独立反映 api 的新增失败（B−A），证据互不污染。
+>
 > **API 测试前置**（阶段 5，在代码审查之前）：单元测试过 ≠ 接口对得上。接口对不上是几秒能验证的事，不能躺到最贵的代码审查才暴露——应用宝此招把审查平均打回从 1.8 次降到 0.4 次。
 
-### Bugfix 流水线（4 阶段，跳过 Spec Freeze）
+### Bugfix 流水线（4 阶段，无 Spec Freeze、无独立 API 门禁）
 
 | 阶段 | assignee | 门禁 |
 |---|---|---|
 | 1 规划（精简） | 规划员 | — |
-| 2 实现 | 实现员 | baseline.py diff（硬） |
-| 3 代码审查 | 代码审查员 | soft gate |
-| 4 验收 | 人类 | — |
+| 2 实现 | 实现员 | — |
+| 3 基线门禁 | 门禁执行器 | baseline.py snapshot --phase after + diff（硬，跑全部 test-plan 命令） |
+| 4 代码审查 | 代码审查员 | soft gate |
+
+> bugfix 的验收：阶段 4 审查 pass 后，把 parent assignee 改给人类 member（同 Spec Freeze 的 member-暂停机制），不占额外 stage。
 
 ---
 
@@ -60,6 +66,7 @@
   - `frozen_spec` = `true`
   - `frozen_test_cases` = `TC-001,TC-002,TC-003`
   - `rollback_3_4` = `1`（阶段 3→4 回退次数，熔断用）
+  - **类型**：布尔键带 `--type bool`、数字键带 `--type number`；不传默认存成字符串，下游 `get` 比较易踩坑。
 - **child issue 评论里的 verdict block**：每个 agent 完成后，在自己的 child issue 发一条评论，内含结构化准出（见下）。队长被唤醒后读这条评论决定下一步。
 
 > 为什么不用 `pipeline-state.yaml`？它会被 GC 清理（done issue 的 workdir 24h 删除）、无并发保护、且没有脚本读取。issue metadata 是 Multica 专门为 pipeline 状态设计的原子 KV。
@@ -127,7 +134,7 @@ gaps: []                             # 下游需注意的未覆盖点
 | tech-test-cases.md | 实现员 | 审查员 | 技术侧测试用例 |
 | review-verdict.yaml | 审查员 | 人 | 审查结论（`decision` 字段） |
 | task.json / gate-result.jsonl | 门禁脚本 | 门禁执行器、队长 | 任务内证据 + 熔断计数 |
-| baseline/ | 实现员 + 脚本 | 门禁执行器 | 测试快照 + diff |
+| baseline/ | 门禁执行器（脚本） | 门禁执行器、审查员 | unit/integration 快照+diff（before/after/diff.json）+ api 快照+diff（api-before/api-after/api-diff.json） |
 
 ---
 
@@ -164,17 +171,17 @@ gaps: []                             # 下游需注意的未覆盖点
 | 测试类型 | 谁写**用例** | 谁写**自动化代码** | 谁**执行** | 谁**出报告** |
 |---|---|---|---|---|
 | 单元测试 | 实现员（技术侧 TC） | 实现员 | **门禁执行器**（baseline.py） | **门禁执行器** |
-| API/接口测试 | 规划员（业务输入/预期）+ 实现员（真实签名） | 实现员 | **门禁执行器**（test-plan 的 api 命令，硬门禁） | **门禁执行器** |
+| API/接口测试 | 规划员（业务输入/预期）+ 实现员（真实签名） | 实现员 | **门禁执行器**（`api_gate.py`，硬门禁；无 api 键则 SKIP） | **门禁执行器** |
 | 集成测试 | 实现员（集成点用例） | 实现员 | **门禁执行器** | **门禁执行器** |
 | E2E 端到端 | 规划员（业务完整旅程） | 实现员（fixture） | 门禁执行器（能自动化的）+ **人类**（真账号/环境） | 门禁执行器 + 人类验收 |
 
-- **执行列全归门禁执行器**——实现员绝不自己跑自己写的（否则等于自审）。
+- **官方门禁执行全归门禁执行器**——`baseline.py` / `api_gate.py` 的 before/after/diff 一律由门禁执行器跑（否则等于自审）。实现员可在本地自验，但门禁以门禁执行器的快照为准。
 - **报告载体**：`gate-result.jsonl`（每门禁 append）+ `baseline/diff.json`（只 block 新增失败 B−A）+ verdict 评论。消费链：门禁执行器出 → 审查员读（语义判断）→ 人类验收。
 - **E2E 是例外**：能自动化的归门禁执行器，最终端到端验收归人类（Agent completed ≠ business completed）。
 
 ### 测试栈发现（项目相关，不下沉脚本默认）
 
-各项目测试命令不同（multica 是 `make test`+`pnpm test`，别的可能是 `pytest`/`go test`）。harness **不硬编码**——由项目 workdir 的 `test-plan.json` 声明各测试类型命令（`{unit:{cmd}, api:{cmd}, ...}`，`cmd:null` 表示该项目无此类测试→跳过不阻断）。`baseline.py` 优先读 test-plan，缺失则退回 pnpm 默认并警告。首次接入可扫 Makefile / AGENTS.md / package.json 生成草稿。
+各项目测试命令不同（multica 是 `make test`+`pnpm test`，别的可能是 `pytest`/`go test`）。harness **不硬编码**——由项目 workdir 的 `test-plan.json` 声明各测试类型命令（`{unit:{cmd}, api:{cmd}, ...}`，`cmd:null` 表示该项目无此类测试→跳过不阻断）。阶段 4 的 `baseline.py` 用 `--exclude api` 只跑 unit/integration/lint/typecheck；阶段 5 的 `api_gate.py` 专门跑 `api` 键（B−A 语义），两门禁不重叠。`baseline.py` 优先读 test-plan，缺失则退回 pnpm 默认并警告。首次接入可扫 Makefile / AGENTS.md / package.json 生成草稿（`detect_tests.py`）。
 
 ---
 

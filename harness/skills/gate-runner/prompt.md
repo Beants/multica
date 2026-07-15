@@ -15,27 +15,37 @@
 | 脚本 | 用途 | 什么时候跑 |
 |---|---|---|
 | `plan_contract_check.py` | 检查 prd/design 存在 + 有必要段落 | 阶段 2（硬） |
-| `baseline.py snapshot` | 实现后快照测试结果 | 阶段 4 前 |
-| `baseline.py diff` | 前后 diff，只 block 新增失败 | 阶段 4（硬） |
+| `baseline.py snapshot --phase before --exclude api` | 冻结 unit/integration 已知失败基线 | 阶段 2（规划门禁内） |
+| `baseline.py snapshot --phase after --exclude api` + `diff` | 前后 diff，只 block 新增失败；`--exclude api` 把 api 留给阶段 5 | 阶段 4（硬） |
+| `api_gate.py snapshot --phase after` + `diff` | 只跑 test-plan 的 `api` 键，B−A 拦新增 api 失败；无 api 键 → SKIP（exit 0） | 阶段 5（硬） |
 | `delivery_checklist.py` | 检查所有产出物齐全 | 交付前 |
 | `workflow_integrity_check.py` | 校验 workflow 定义完整性 | 阶段 2 辅助 |
 | `spec_freshness.py` | 检查知识/spec 是否过期 | 阶段 2 辅助 |
 | `rollback_counter.py` | 回退计数 + 熔断判定（队长调用） | 回退时 |
 | `gate_result.py append` | 把一次门禁结果追加到证据流 | **每次跑门禁都写** |
 
+> `gates/` 里还有 `gate_prd_confirm.py` / `scar_summary.py` / `verification_contract_check.py` 三个脚本暂未纳入标准流程（待定是孤儿还是补入），标准流水线不调用。
+
 ## 怎么跑
 
 ```bash
-# 规划门禁
+# 阶段 2 规划门禁：plan 契约（硬）+ 冻结 before 基线（排除 api）
 python3 harness/gates/plan_contract_check.py --task <工作目录>
+python3 harness/gates/baseline.py snapshot --task . --phase before --exclude api
 
-# 基线门禁（两步）—— --task 指当前 workdir（用 . 或 workdir 绝对路径）
-python3 harness/gates/baseline.py snapshot --task . --phase after --commands "<测试命令>"
+# 阶段 4 基线门禁：after 快照（排除 api）+ diff（硬）
+python3 harness/gates/baseline.py snapshot --task . --phase after --exclude api
 python3 harness/gates/baseline.py diff --task .
+
+# 阶段 5 API/接口门禁：只跑 test-plan 的 api 键（硬）；无 api 键 → SKIP（exit 0，记 skipped）
+python3 harness/gates/api_gate.py snapshot --task . --phase after
+python3 harness/gates/api_gate.py diff --task .
 
 # 交付检查
 python3 harness/gates/delivery_checklist.py --task <工作目录>
 ```
+
+`--task` 指当前 workdir（用 `.` 或绝对路径）。`--exclude api` 是关键：不让阶段 4 和阶段 5 重复跑 api。test-plan.json 由 `detect_tests.py` 生成草稿。
 
 ## 证据必须落盘（每次都做）
 
