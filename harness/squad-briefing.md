@@ -91,7 +91,7 @@
 | 规划员 | 写 prd/design/business-test-cases | 写代码、碰 issue 状态、改全局 metadata |
 | 实现员 | 写代码+单测+技术测试用例 | 改 prd/design/business-test-cases、碰 issue 状态 |
 | 代码审查员 | 读 diff 写审查结论（只评不改） | 改代码 |
-| 门禁执行器 | 跑脚本翻译 exit code | 写代码、改制品 |
+| 门禁执行器 | 跑脚本拿**事实** + 对失败逐条做**处置判断**(fatal 阻断 / flaky 重试 / 历史 warn) + 跑**语义门禁**(PRD 质量 / 范围溢出 / 对抗审查)；事实不可推翻 | 写代码、改制品、把 fatal 洗成 pass |
 
 **铁律：下游不可修改上游产物。** 要改就在 issue 评论里提，由队长打回上游重做。
 
@@ -144,9 +144,11 @@ gaps: []                             # 下游需注意的未覆盖点
 
 | 层 | 例子 | 强制力 |
 |---|---|---|
-| 硬（Script） | plan_contract_check、baseline diff、lint/test exit code | 阻断推进 |
-| 半硬（Hybrid） | 对抗性交付审查 | 脚本备料 + 模型判定，结论进证据 |
+| 硬（Script） | baseline/api_gate diff、lint/test exit code | **事实不可推翻**（脚本出新增失败清单）；门禁执行器逐条做**处置**——fatal 阻断 / flaky 重试 / 历史残留 warn。仅 fatal 才推进阻断 |
+| 半硬（Hybrid） | PRD 质量评分、范围溢出检查、对抗性交付审查 | 脚本备料 + 门禁执行器判定，结论进证据 |
 | 软（Soft） | 代码审查质量 | 记 verdict + findings，不阻断；在下一 human gate 暴露 |
+
+> **硬门禁 = 事实 + 处置**：脚本只跑出「新增失败清单」（客观事实，门禁执行器不可推翻）；每条的性质（fatal/flaky/历史）和处置（阻断 / warn+伤疤）由门禁执行器判定。事实层剥夺 AI 解释权（不能把失败说成历史问题），处置层软化避免一刀切。
 
 ### 对抗性交付审查（Hybrid Gate）
 
