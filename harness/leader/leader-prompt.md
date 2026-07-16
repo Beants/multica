@@ -99,7 +99,7 @@ issue create --parent <p> --stage 2 --title "规划门禁" --assignee-id <门禁
 阶段 2 门禁 pass 后：
 
 1. `metadata set <parent> --key frozen_spec --value pending --type string`（占位，表示等人）。
-2. `multica issue assign <parent> --to-id <人类 member id>` ← 把 parent 改给人类。平台停止自动唤醒，等人评审。
+2. `multica issue assign <parent> --to-id <approver 的 user_id>` ← 把 parent 改给 squad 的 approver（人类成员，role=approver）。平台停止自动唤醒（member assignee 不触发 child-done），等人评审。
 3. 人评审 prd.md + business-test-cases.md：
    - 人要改 → 人评论写清修改点 + 把规划员 child 提回 todo（规划员 resume 后按自身 instructions 主动读 issue 评论）。
    - 人确认冻结 → 人设 `metadata set <parent> --key frozen_spec --value true --type bool` + `--key frozen_test_cases --value TC-001,TC-002`，再把 parent assignee 改回队长 agent。

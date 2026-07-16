@@ -92,6 +92,9 @@
 | 实现员 | 写代码+单测+技术测试用例 | 改 prd/design/business-test-cases、碰 issue 状态 |
 | 代码审查员 | 读 diff 写审查结论（只评不改） | 改代码 |
 | 门禁执行器 | 跑脚本拿**事实** + 对失败逐条做**处置判断**(fatal 阻断 / flaky 重试 / 历史 warn) + 跑**语义门禁**(PRD 质量 / 范围溢出 / 对抗审查)；事实不可推翻 | 写代码、改制品、把 fatal 洗成 pass |
+| **人类 approver**（squad member: type=member, role=approver） | Spec Freeze 评审 prd+business-test-cases、阶段 7 验收、熔断兜底。机制：队长把 parent assignee 改给 approver → `issue_child_done.go` 不触发屏障唤醒 → 暂停等人 | 写代码、跑门禁、自推进 issue 状态 |
+
+> 人类 approver 是 squad 第 6 成员（前 5 是 agent）。加入：`multica squad member add <squad> --member-id <user_id> --type member --role approver`（member-id 用 **user_id**，不是 workspace member id）。
 
 **铁律：下游不可修改上游产物。** 要改就在 issue 评论里提，由队长打回上游重做。
 
