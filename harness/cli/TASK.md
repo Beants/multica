@@ -1,5 +1,7 @@
 # Multica Harness CLI — 开发任务书
 
+> 本文档仅描述 `resume.py`（终端续聊）的设计。`cli/` 现另含 `sync_skills.py`（社区 skill 同步）与 `register_skills.py`（注册到 multica + bind role agent），详见 README「方法论 skill」节。
+
 ## 目标
 
 写一个 Python CLI 工具 `harness`，让用户从命令行快速唤起终端，续聊 Multica 上某个 agent 的 session。

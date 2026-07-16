@@ -30,7 +30,7 @@ harness/
 ├── pipeline/
 │   ├── standard.yaml                ← 标准流水线定义
 │   └── bugfix.yaml                  ← Bugfix 流水线定义
-├── gates/                           ← 门禁脚本（11 个 Python 脚本）
+├── gates/                           ← 门禁脚本（13 个 Python：含 detect_tests / api_gate）
 │   ├── baseline.py                  ← 实现前后测试快照 + diff
 │   ├── plan_contract_check.py       ← 规划制品完整性检查
 │   ├── delivery_checklist.py        ← 交付完整性检查
@@ -44,7 +44,9 @@ harness/
 │   ├── evidence-and-quality-gates.md← 10 道质量门禁
 │   └── ...
 └── cli/
-    ├── resume.py                    ← 快速唤起终端续聊（半成品）
+    ├── sync_skills.py               ← 从社区 repo 同步 skill（sync / check）
+    ├── register_skills.py           ← 注册 skill 到 multica + bind role agent
+    └── resume.py                    ← 快速唤起终端续聊（半成品）
     └── TASK.md                      ← CLI 开发任务书
 ```
 
@@ -108,7 +110,7 @@ python3 harness/cli/register_skills.py
 
 | 原则 | 来源 | 落地 |
 |---|---|---|
-| 脚本管确定性，Prompt 只留语义判断 | 腾讯 TEG | 11 个 Python 门禁脚本 |
+| 脚本管确定性，Prompt 只留语义判断 | 腾讯 TEG | 13 个 Python 门禁脚本 |
 | Agent completed ≠ Business completed | 腾讯"凌晨三点" | 人工验收独立阶段 |
 | 下游不可修改上游产物 | 腾讯 TAB | squad-briefing 铁律 |
 | 能判定的就别留在 Rule 里 | 腾讯 TAB | 三层门禁硬度（硬/半硬/软） |
