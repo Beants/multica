@@ -171,6 +171,7 @@ import {
   CreateWorkflowHookResponseSchema,
   EMPTY_ACCEPTANCE_DECISION,
   EMPTY_CREATE_WORKFLOW_HOOK_RESPONSE,
+  EMPTY_WORKFLOW_HOOK,
   EMPTY_WORKFLOW_HOOK_LIST,
   EMPTY_WORKFLOW_RUN_DETAIL,
   EMPTY_WORKFLOW_RUN_LIST,
@@ -2831,7 +2832,7 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/workflow-hooks/${id}/disable`, {
       method: "POST",
     });
-    return parseWithFallback(raw, WorkflowHookSchema, EMPTY_CREATE_WORKFLOW_HOOK_RESPONSE, {
+    return parseWithFallback(raw, WorkflowHookSchema, EMPTY_WORKFLOW_HOOK, {
       endpoint: "POST /api/workflow-hooks/:id/disable",
     });
   }

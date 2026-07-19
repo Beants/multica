@@ -141,6 +141,15 @@ export const CreateWorkflowHookResponseSchema = WorkflowHookSchema.extend({
 
 export const EMPTY_WORKFLOW_HOOK_LIST: WorkflowHook[] = [];
 
+export const EMPTY_WORKFLOW_HOOK: WorkflowHook = {
+  id: "",
+  template_id: "",
+  name: "",
+  status: "active",
+  last_used_at: null,
+  created_at: "",
+};
+
 export const EMPTY_CREATE_WORKFLOW_HOOK_RESPONSE: CreateWorkflowHookResponse = {
   id: "",
   template_id: "",
