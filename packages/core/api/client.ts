@@ -145,6 +145,38 @@ import type {
   CreateCloudRuntimeNodeRequest,
   ListCloudRuntimeNodesParams,
 } from "../runtimes/cloud-runtime";
+import type {
+  AcceptanceDecisionResponse,
+  CreateWorkflowHookRequest,
+  CreateWorkflowHookResponse,
+  CreateWorkflowTemplateRequest,
+  RejectAcceptanceRequest,
+  UpdateWorkflowTemplateRequest,
+  WorkflowHook,
+  WorkflowRun,
+  WorkflowRunDetail,
+  WorkflowTemplate,
+  WorkflowTemplateDetail,
+} from "../workflows/types";
+import {
+  AcceptanceDecisionSchema,
+  CreateWorkflowHookResponseSchema,
+  EMPTY_ACCEPTANCE_DECISION,
+  EMPTY_CREATE_WORKFLOW_HOOK_RESPONSE,
+  EMPTY_WORKFLOW_HOOK_LIST,
+  EMPTY_WORKFLOW_RUN_DETAIL,
+  EMPTY_WORKFLOW_RUN_LIST,
+  EMPTY_WORKFLOW_TEMPLATE,
+  EMPTY_WORKFLOW_TEMPLATE_DETAIL,
+  EMPTY_WORKFLOW_TEMPLATE_LIST,
+  WorkflowHookListSchema,
+  WorkflowHookSchema,
+  WorkflowRunDetailSchema,
+  WorkflowRunListSchema,
+  WorkflowTemplateDetailSchema,
+  WorkflowTemplateListSchema,
+  WorkflowTemplateSchema,
+} from "../workflows/schemas";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
@@ -2513,6 +2545,126 @@ export class ApiClient {
     return this.fetch(`/api/slack/binding/redeem`, {
       method: "POST",
       body: JSON.stringify({ token }),
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Workflow engine (P0 fork). Flat routes + X-Workspace-Slug, gated
+  // server-side by the workflow_engine flag (404 while off). Every response
+  // goes through the lenient zod boundary in workflows/schemas.ts so a
+  // contract drift degrades to an empty-but-rendering page.
+  // ---------------------------------------------------------------------
+
+  async listWorkflowTemplates(): Promise<WorkflowTemplate[]> {
+    const raw = await this.fetch<unknown>(`/api/workflow-templates`);
+    return parseWithFallback(raw, WorkflowTemplateListSchema, EMPTY_WORKFLOW_TEMPLATE_LIST, {
+      endpoint: "GET /api/workflow-templates",
+    });
+  }
+
+  async getWorkflowTemplate(id: string): Promise<WorkflowTemplateDetail> {
+    const raw = await this.fetch<unknown>(`/api/workflow-templates/${id}`);
+    return parseWithFallback(raw, WorkflowTemplateDetailSchema, EMPTY_WORKFLOW_TEMPLATE_DETAIL, {
+      endpoint: "GET /api/workflow-templates/:id",
+    });
+  }
+
+  async createWorkflowTemplate(data: CreateWorkflowTemplateRequest): Promise<WorkflowTemplateDetail> {
+    const raw = await this.fetch<unknown>(`/api/workflow-templates`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, WorkflowTemplateDetailSchema, EMPTY_WORKFLOW_TEMPLATE_DETAIL, {
+      endpoint: "POST /api/workflow-templates",
+    });
+  }
+
+  async updateWorkflowTemplate(id: string, data: UpdateWorkflowTemplateRequest): Promise<WorkflowTemplateDetail> {
+    const raw = await this.fetch<unknown>(`/api/workflow-templates/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, WorkflowTemplateDetailSchema, EMPTY_WORKFLOW_TEMPLATE_DETAIL, {
+      endpoint: "PUT /api/workflow-templates/:id",
+    });
+  }
+
+  async publishWorkflowTemplate(id: string): Promise<WorkflowTemplateDetail> {
+    const raw = await this.fetch<unknown>(`/api/workflow-templates/${id}/publish`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, WorkflowTemplateDetailSchema, EMPTY_WORKFLOW_TEMPLATE_DETAIL, {
+      endpoint: "POST /api/workflow-templates/:id/publish",
+    });
+  }
+
+  async archiveWorkflowTemplate(id: string): Promise<WorkflowTemplate> {
+    const raw = await this.fetch<unknown>(`/api/workflow-templates/${id}/archive`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, WorkflowTemplateSchema, EMPTY_WORKFLOW_TEMPLATE, {
+      endpoint: "POST /api/workflow-templates/:id/archive",
+    });
+  }
+
+  async listWorkflowHooks(): Promise<WorkflowHook[]> {
+    const raw = await this.fetch<unknown>(`/api/workflow-hooks`);
+    return parseWithFallback(raw, WorkflowHookListSchema, EMPTY_WORKFLOW_HOOK_LIST, {
+      endpoint: "GET /api/workflow-hooks",
+    });
+  }
+
+  // The cleartext hook token is returned exactly once, here at creation —
+  // the server persists only its SHA-256 hash.
+  async createWorkflowHook(data: CreateWorkflowHookRequest): Promise<CreateWorkflowHookResponse> {
+    const raw = await this.fetch<unknown>(`/api/workflow-hooks`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, CreateWorkflowHookResponseSchema, EMPTY_CREATE_WORKFLOW_HOOK_RESPONSE, {
+      endpoint: "POST /api/workflow-hooks",
+    });
+  }
+
+  async disableWorkflowHook(id: string): Promise<WorkflowHook> {
+    const raw = await this.fetch<unknown>(`/api/workflow-hooks/${id}/disable`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, WorkflowHookSchema, EMPTY_CREATE_WORKFLOW_HOOK_RESPONSE, {
+      endpoint: "POST /api/workflow-hooks/:id/disable",
+    });
+  }
+
+  async listWorkflowRuns(): Promise<WorkflowRun[]> {
+    const raw = await this.fetch<unknown>(`/api/workflow-runs`);
+    return parseWithFallback(raw, WorkflowRunListSchema, EMPTY_WORKFLOW_RUN_LIST, {
+      endpoint: "GET /api/workflow-runs",
+    });
+  }
+
+  async getWorkflowRun(id: string): Promise<WorkflowRunDetail> {
+    const raw = await this.fetch<unknown>(`/api/workflow-runs/${id}`);
+    return parseWithFallback(raw, WorkflowRunDetailSchema, EMPTY_WORKFLOW_RUN_DETAIL, {
+      endpoint: "GET /api/workflow-runs/:id",
+    });
+  }
+
+  async approveWorkflowAcceptance(runId: string): Promise<AcceptanceDecisionResponse> {
+    const raw = await this.fetch<unknown>(`/api/workflow-runs/${runId}/acceptance/approve`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, AcceptanceDecisionSchema, EMPTY_ACCEPTANCE_DECISION, {
+      endpoint: "POST /api/workflow-runs/:id/acceptance/approve",
+    });
+  }
+
+  async rejectWorkflowAcceptance(runId: string, data: RejectAcceptanceRequest): Promise<AcceptanceDecisionResponse> {
+    const raw = await this.fetch<unknown>(`/api/workflow-runs/${runId}/acceptance/reject`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, AcceptanceDecisionSchema, EMPTY_ACCEPTANCE_DECISION, {
+      endpoint: "POST /api/workflow-runs/:id/acceptance/reject",
     });
   }
 }

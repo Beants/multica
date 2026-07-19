@@ -21,6 +21,13 @@ import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { DashboardPage } from "@multica/views/dashboard";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
+import {
+  TemplateListPage as WorkflowTemplatesPage,
+  RunListPage as WorkflowRunsPage,
+  HookListPage as WorkflowHooksPage,
+} from "@multica/views/workflows/components";
+import { WorkflowTemplateDetailPage } from "./pages/workflow-template-detail-page";
+import { WorkflowRunDetailPage } from "./pages/workflow-run-detail-page";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
@@ -151,6 +158,31 @@ export const appRoutes: RouteObject[] = [
             path: "autopilots/:id",
             element: <AutopilotDetailPage />,
             handle: { title: "Autopilot" },
+          },
+          {
+            path: "workflows",
+            element: <WorkflowTemplatesPage />,
+            handle: { title: "Workflows" },
+          },
+          {
+            path: "workflows/templates/:id",
+            element: <WorkflowTemplateDetailPage />,
+            handle: { title: "Workflow Template" },
+          },
+          {
+            path: "workflows/runs",
+            element: <WorkflowRunsPage />,
+            handle: { title: "Workflow Runs" },
+          },
+          {
+            path: "workflows/runs/:id",
+            element: <WorkflowRunDetailPage />,
+            handle: { title: "Workflow Run" },
+          },
+          {
+            path: "workflows/hooks",
+            element: <WorkflowHooksPage />,
+            handle: { title: "Workflow Hooks" },
           },
           {
             path: "my-issues",
