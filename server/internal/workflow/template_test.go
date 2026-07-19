@@ -51,19 +51,19 @@ func TestValidateTemplateGraph(t *testing.T) {
 			name:    "branch rejected (P0 linear)",
 			nodes:   []NodeInput{node("a"), node("b"), node("c")},
 			edges:   []EdgeInput{{FromNodeKey: "a", ToNodeKey: "b"}, {FromNodeKey: "a", ToNodeKey: "c"}},
-			wantErr: "more than one outgoing edge",
+			wantErr: "outgoing edges",
 		},
 		{
 			name:    "cycle rejected",
 			nodes:   []NodeInput{node("a"), node("b")},
 			edges:   []EdgeInput{{FromNodeKey: "a", ToNodeKey: "b"}, {FromNodeKey: "b", ToNodeKey: "a"}},
-			wantErr: "requires exactly 1 edges",
+			wantErr: "cycle detected",
 		},
 		{
 			name:    "orphan node rejected",
 			nodes:   []NodeInput{node("a"), node("b"), node("c")},
 			edges:   linearEdges("a", "b"),
-			wantErr: "requires exactly 2 edges",
+			wantErr: "exactly one start node",
 		},
 		{
 			name:    "edge to unknown",
@@ -72,9 +72,9 @@ func TestValidateTemplateGraph(t *testing.T) {
 			wantErr: "unknown node",
 		},
 		{
-			name:    "gate type rejected in P0",
+			name:    "gate type rejected",
 			nodes:   []NodeInput{typedNode("g", "gate", NodeConfig{})},
-			wantErr: "unsupported P0 type",
+			wantErr: "unsupported type",
 		},
 	}
 	for _, tt := range tests {

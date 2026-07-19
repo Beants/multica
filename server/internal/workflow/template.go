@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -19,12 +20,15 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// Node types (workflow_node.type CHECK). gate/fan_out/converge exist in the
-// schema CHECK for P1 forward-compat but are never instantiated in P0.
+// Node types (workflow_node.type CHECK). fan_out/converge are accepted by
+// the DAG validator (P1-1 Wave 0) but not yet dispatched by activateNode
+// (Wave 2 adds the case branches). gate remains P1+ forward-compat only.
 const (
 	NodeTypeAgent      = "agent"
 	NodeTypeAcceptance = "acceptance"
 	NodeTypeEnd        = "end"
+	NodeTypeFanOut     = "fan_out"
+	NodeTypeConverge   = "converge"
 )
 
 // Node roles (node config.role). executor is the default when unset.
@@ -202,35 +206,69 @@ func (s *Snapshot) UpstreamNodeKeys(nodeKey string) []string {
 	return out
 }
 
-// NextAfter returns the node reached from nodeKey by the default edge — P0
-// edges carry condition=NULL, so the engine takes the single outgoing edge
-// (lowest priority value wins if a malformed graph ever carries more).
-// Returns nil at the chain tail.
-func (s *Snapshot) NextAfter(nodeKey string) *SnapshotNode {
-	best := -1
+// NextAfterAll returns every node reached from nodeKey by an outgoing edge,
+// sorted by priority ascending (ties broken by ToNodeKey for stability). P0
+// linear templates have out-degree 1, so the slice length is exactly 1 for
+// mid-chain nodes and 0 at the chain tail — the P0 single-next semantics
+// are recovered as `NextAfterAll(x)[0]` (callers must nil-check the slice).
+//
+// P0 edges carry condition=NULL; the DAG validator (Wave 0) admits fan_out
+// branching, so a fan_out node's NextAfterAll may return N > 1 elements.
+func (s *Snapshot) NextAfterAll(nodeKey string) []SnapshotNode {
+	type cand struct {
+		idx      int
+		priority int32
+		toKey    string
+	}
+	var cands []cand
 	for i, e := range s.Edges {
 		if e.FromNodeKey != nodeKey {
 			continue
 		}
-		if best == -1 || e.Priority < s.Edges[best].Priority {
-			best = i
+		cands = append(cands, cand{idx: i, priority: e.Priority, toKey: e.ToNodeKey})
+	}
+	// Stable order: priority asc, then ToNodeKey asc — deterministic across
+	// equal-priority edges so test assertions and downstream activation are
+	// reproducible.
+	sort.Slice(cands, func(i, j int) bool {
+		if cands[i].priority != cands[j].priority {
+			return cands[i].priority < cands[j].priority
+		}
+		return cands[i].toKey < cands[j].toKey
+	})
+	out := make([]SnapshotNode, 0, len(cands))
+	for _, c := range cands {
+		if n := s.NodeByKey(s.Edges[c.idx].ToNodeKey); n != nil {
+			out = append(out, *n)
 		}
 	}
-	if best == -1 {
-		return nil
-	}
-	return s.NodeByKey(s.Edges[best].ToNodeKey)
+	return out
 }
 
-// DownstreamNodeKeys returns every node after nodeKey in chain order
-// (exclusive of nodeKey itself). Rework invalidates exactly this set
-// (design.md §4.4).
+// DownstreamNodeKeys returns every transitive descendant of nodeKey in the
+// DAG (exclusive of nodeKey itself), discovered by BFS over NextAfterAll.
+// The visited map makes the walk cycle-safe even when the graph is
+// malformed at runtime (publish validation rejects cycles, but a hand-edited
+// snapshot could still loop).
+//
+// Rework invalidates exactly this set (design.md §4.4). For P0 linear
+// templates the BFS degenerates to the original chain walk and returns the
+// same node list, in chain order.
 func (s *Snapshot) DownstreamNodeKeys(nodeKey string) []string {
+	visited := map[string]bool{nodeKey: true}
 	var out []string
-	seen := map[string]bool{nodeKey: true}
-	for cur := s.NextAfter(nodeKey); cur != nil && !seen[cur.NodeKey]; cur = s.NextAfter(cur.NodeKey) {
-		seen[cur.NodeKey] = true
-		out = append(out, cur.NodeKey)
+	queue := []string{nodeKey}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, next := range s.NextAfterAll(cur) {
+			if visited[next.NodeKey] {
+				continue
+			}
+			visited[next.NodeKey] = true
+			out = append(out, next.NodeKey)
+			queue = append(queue, next.NodeKey)
+		}
 	}
 	return out
 }
@@ -307,9 +345,24 @@ func NewTemplateService(q *db.Queries, tx TxStarter) *TemplateService {
 	return &TemplateService{Queries: q, TxStarter: tx}
 }
 
-// validateTemplateGraph enforces the P0 linear-chain shape: exactly one
-// start node, at most one outgoing edge per node, and a single chain that
-// covers every node (no cycles, no orphans, no branching).
+// validateTemplateGraph enforces the P1-1 DAG shape: P0 type set
+// (agent/acceptance/end) plus fan_out/converge, exactly one start node
+// (in-degree 0), no cycles, no orphans, and per-type out-degree rules.
+//
+// Out-degree rules:
+//   - fan_out: ≥ 1 (the branching node — may have many downstreams)
+//   - converge: == 1 (single downstream; multi-inbound is the converge
+//     semantics, but the post-converge chain is linear)
+//   - agent / acceptance: == 1 (linear pass-through)
+//   - end: == 0 (terminal)
+//
+// In-degree rules: converge allows ≥ 1 inbound (the multi-inbound case is
+// the AND-join; the fan_out↔converge pairing check is Wave 1's job, this
+// validator only admits the shape). All other types expect exactly 1
+// inbound except the single start node (in-degree 0).
+//
+// P0 linear templates satisfy this unchanged (out-degree 1 everywhere
+// except the end node), so the upgrade is backward-compatible.
 func validateTemplateGraph(nodes []NodeInput, edges []EdgeInput) error {
 	if len(nodes) == 0 {
 		return errors.New("workflow: at least one node is required")
@@ -324,9 +377,9 @@ func validateTemplateGraph(nodes []NodeInput, edges []EdgeInput) error {
 		}
 		keys[n.NodeKey] = true
 		switch n.Type {
-		case NodeTypeAgent, NodeTypeAcceptance, NodeTypeEnd:
+		case NodeTypeAgent, NodeTypeAcceptance, NodeTypeEnd, NodeTypeFanOut, NodeTypeConverge:
 		default:
-			return fmt.Errorf("workflow: node %q has unsupported P0 type %q", n.NodeKey, n.Type)
+			return fmt.Errorf("workflow: node %q has unsupported type %q", n.NodeKey, n.Type)
 		}
 		if n.Name == "" {
 			return fmt.Errorf("workflow: node %q requires a name", n.NodeKey)
@@ -338,9 +391,6 @@ func validateTemplateGraph(nodes []NodeInput, edges []EdgeInput) error {
 		if n.Type == NodeTypeAgent && cfg.AgentSelector == "" && cfg.AgentID == "" {
 			return fmt.Errorf("workflow: agent node %q requires agent_selector", n.NodeKey)
 		}
-	}
-	if len(nodes) > 1 && len(edges) != len(nodes)-1 {
-		return fmt.Errorf("workflow: a linear chain of %d nodes requires exactly %d edges, got %d", len(nodes), len(nodes)-1, len(edges))
 	}
 	inDegree := map[string]int{}
 	outDegree := map[string]int{}
@@ -356,39 +406,74 @@ func validateTemplateGraph(nodes []NodeInput, edges []EdgeInput) error {
 		}
 		inDegree[e.ToNodeKey]++
 		outDegree[e.FromNodeKey]++
-		if outDegree[e.FromNodeKey] > 1 {
-			return fmt.Errorf("workflow: node %q has more than one outgoing edge (P0 is linear)", e.FromNodeKey)
+	}
+	// Per-type out-degree check. fan_out is the only branching type; every
+	// other type keeps P0's out-degree ≤ 1 invariant (0 = chain tail).
+	for _, n := range nodes {
+		got := outDegree[n.NodeKey]
+		switch n.Type {
+		case NodeTypeFanOut:
+			if got < 1 {
+				return fmt.Errorf("workflow: fan_out node %q requires at least 1 outgoing edge", n.NodeKey)
+			}
+		default:
+			if got > 1 {
+				return fmt.Errorf("workflow: node %q has %d outgoing edges, want at most 1 (only fan_out may branch)", n.NodeKey, got)
+			}
 		}
 	}
+	// Exactly one start node (in-degree 0). Zero starts means the graph is
+	// one big cycle (every node has at least one inbound edge).
 	var starts []string
 	for _, n := range nodes {
 		if inDegree[n.NodeKey] == 0 {
 			starts = append(starts, n.NodeKey)
 		}
 	}
-	if len(starts) != 1 {
+	switch len(starts) {
+	case 1:
+		// ok
+	case 0:
+		return errors.New("workflow: template has no start node (every node has an inbound edge — cycle detected)")
+	default:
 		return fmt.Errorf("workflow: template must have exactly one start node, found %d", len(starts))
 	}
-	// Walk the chain from the start; every node must be visited (no cycles,
-	// no unreachable tails). With out-degree ≤ 1 the walk cannot branch.
-	next := map[string]string{}
+	// BFS from the start: every node must be reachable (no orphans), and
+	// any back-edge (a node already fully processed in DFS terms) means a
+	// cycle. Use color marking: white=unseen, grey=on-stack, black=done.
+	adj := map[string][]string{}
 	for _, e := range edges {
-		next[e.FromNodeKey] = e.ToNodeKey
+		adj[e.FromNodeKey] = append(adj[e.FromNodeKey], e.ToNodeKey)
 	}
-	visited := map[string]bool{}
-	for cur := starts[0]; ; {
-		if visited[cur] {
-			return fmt.Errorf("workflow: cycle detected at node %q", cur)
+	const (
+		white = 0
+		grey  = 1
+		black = 2
+	)
+	color := map[string]int{}
+	var dfs func(key string) error
+	dfs = func(key string) error {
+		color[key] = grey
+		for _, next := range adj[key] {
+			switch color[next] {
+			case white:
+				if err := dfs(next); err != nil {
+					return err
+				}
+			case grey:
+				return fmt.Errorf("workflow: cycle detected at node %q (edge %q → %q)", next, key, next)
+			}
 		}
-		visited[cur] = true
-		nxt, ok := next[cur]
-		if !ok {
-			break
-		}
-		cur = nxt
+		color[key] = black
+		return nil
 	}
-	if len(visited) != len(nodes) {
-		return errors.New("workflow: chain does not cover all nodes")
+	if err := dfs(starts[0]); err != nil {
+		return err
+	}
+	for _, n := range nodes {
+		if color[n.NodeKey] == white {
+			return fmt.Errorf("workflow: node %q is unreachable from the start node", n.NodeKey)
+		}
 	}
 	return nil
 }

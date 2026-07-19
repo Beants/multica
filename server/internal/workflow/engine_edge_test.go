@@ -45,13 +45,14 @@ func TestSnapshotHelpers(t *testing.T) {
 	if got := snap.StartNode(); got == nil || got.NodeKey != "a" {
 		t.Fatalf("start node = %v, want a", got)
 	}
-	// Default-edge selection by priority: the lower priority value wins when
-	// a (malformed) graph carries more than one outgoing edge.
-	if got := snap.NextAfter("a"); got == nil || got.NodeKey != "c" {
-		t.Fatalf("NextAfter(a) = %v, want c (priority 1 beats 2)", got)
+	// NextAfterAll returns every downstream sorted by priority asc; ties
+	// broken by ToNodeKey. a→c (priority 1) precedes a→b (priority 2).
+	nexts := snap.NextAfterAll("a")
+	if len(nexts) != 2 || nexts[0].NodeKey != "c" || nexts[1].NodeKey != "b" {
+		t.Fatalf("NextAfterAll(a) = %+v, want [c b] (priority 1 beats 2)", nexts)
 	}
-	if got := snap.NextAfter("c"); got != nil {
-		t.Fatalf("NextAfter(c) = %v, want nil (chain tail)", got)
+	if got := snap.NextAfterAll("c"); len(got) != 0 {
+		t.Fatalf("NextAfterAll(c) = %+v, want empty (chain tail)", got)
 	}
 	if snap.NodeByKey("zzz") != nil {
 		t.Fatalf("NodeByKey(zzz) must be nil")

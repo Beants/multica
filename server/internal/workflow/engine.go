@@ -326,9 +326,11 @@ func (e *Engine) StartRun(ctx context.Context, p StartRunParams) (db.WorkflowRun
 	if err != nil {
 		return db.WorkflowRun{}, false, fmt.Errorf("activate start node: %w", err)
 	}
-	if next := snap.NextAfter(startNode.NodeKey); next != nil {
-		if err := preCreateStepTx(ctx, qtx, run.ID, next.NodeKey); err != nil {
-			return db.WorkflowRun{}, false, fmt.Errorf("pre-create next node: %w", err)
+	if next := snap.NextAfterAll(startNode.NodeKey); len(next) > 0 {
+		for _, n := range next {
+			if err := preCreateStepTx(ctx, qtx, run.ID, n.NodeKey); err != nil {
+				return db.WorkflowRun{}, false, fmt.Errorf("pre-create next node: %w", err)
+			}
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -435,17 +437,25 @@ func (e *Engine) consumeVerdictTx(ctx context.Context, stepInstanceID pgtype.UUI
 		if !e.transitionStepTx(ctx, qtx, step, StepPassed, "verdict", verdictPayload(verdict)) {
 			return none, nil // lost the guard race; another consumer advanced
 		}
-		if next := snap.NextAfter(step.NodeKey); next != nil {
-			nextStep, err := activateStepTx(ctx, qtx, run.ID, next.NodeKey)
-			if err != nil {
-				return none, err
-			}
-			if after := snap.NextAfter(next.NodeKey); after != nil {
-				if err := preCreateStepTx(ctx, qtx, run.ID, after.NodeKey); err != nil {
+		if next := snap.NextAfterAll(step.NodeKey); len(next) > 0 {
+			// Wave 0 P0 invariant: agent/acceptance nodes have out-degree
+			// 1, so this loop runs once. fan_out would branch (N>1) but
+			// fan_out activation lands in Wave 2 — for now the loop body's
+			// action.nextNode/nextStep assignment picks the last iter, which
+			// is fine because the slice has exactly one element here.
+			for _, nxt := range next {
+				nextStep, err := activateStepTx(ctx, qtx, run.ID, nxt.NodeKey)
+				if err != nil {
 					return none, err
 				}
+				for _, after := range lookaheadTargets(snap, &nxt) {
+					if err := preCreateStepTx(ctx, qtx, run.ID, after.NodeKey); err != nil {
+						return none, err
+					}
+				}
+				n := nxt // capture for address (Go loop var safety)
+				action.kind, action.nextNode, action.nextStep = "advance", &n, nextStep
 			}
-			action.kind, action.nextNode, action.nextStep = "advance", next, nextStep
 		} else {
 			// Chain tail passed: no end node modeled — complete the run.
 			action.kind = "complete"
@@ -994,17 +1004,20 @@ func (e *Engine) decideAcceptanceTx(ctx context.Context, runID, acceptanceID, de
 		if !e.transitionStepTx(ctx, qtx, step, StepPassed, triggerBy, map[string]any{"acceptance_id": util.UUIDToString(acc.ID)}) {
 			return none, ErrAcceptanceConflict
 		}
-		if next := snap.NextAfter(step.NodeKey); next != nil {
-			nextStep, err := activateStepTx(ctx, qtx, run.ID, next.NodeKey)
-			if err != nil {
-				return none, err
-			}
-			if after := snap.NextAfter(next.NodeKey); after != nil {
-				if err := preCreateStepTx(ctx, qtx, run.ID, after.NodeKey); err != nil {
+		if next := snap.NextAfterAll(step.NodeKey); len(next) > 0 {
+			for _, nxt := range next {
+				nextStep, err := activateStepTx(ctx, qtx, run.ID, nxt.NodeKey)
+				if err != nil {
 					return none, err
 				}
+				for _, after := range lookaheadTargets(snap, &nxt) {
+					if err := preCreateStepTx(ctx, qtx, run.ID, after.NodeKey); err != nil {
+						return none, err
+					}
+				}
+				n := nxt
+				action.kind, action.nextNode, action.nextStep = "advance", &n, nextStep
 			}
-			action.kind, action.nextNode, action.nextStep = "advance", next, nextStep
 		} else {
 			action.kind = "complete"
 		}
@@ -1121,6 +1134,33 @@ func preCreateStepTx(ctx context.Context, qtx *db.Queries, runID pgtype.UUID, no
 		return nil
 	default:
 		return fmt.Errorf("check pending step for %q: %w", nodeKey, err)
+	}
+}
+
+// lookaheadTargets returns the nodes whose pending rows should be
+// pre-created (one level ahead) when `node` has just been activated.
+// Pre-creation mirrors P0's inventory D-3 "one node ahead" semantics but
+// adapts to DAG node types:
+//
+//   - fan_out: no lookahead. fan_out's downstreams are sibling child steps
+//     that fan_out activation expands dynamically (Wave 2); pre-creating
+//     them here would race with the fan_out trigger.
+//   - converge: pre-create converge's downstream (usually 1, the
+//     post-converge linear node).
+//   - agent / acceptance / end: pre-create the single downstream (P0
+//     behavior; out-degree 1 → slice of 1).
+//
+// For P0 linear templates the result is identical to the original
+// `snap.NextAfter(next.NodeKey)` single-element form.
+func lookaheadTargets(snap *Snapshot, node *SnapshotNode) []SnapshotNode {
+	if node == nil {
+		return nil
+	}
+	switch node.Type {
+	case NodeTypeFanOut:
+		return nil
+	default:
+		return snap.NextAfterAll(node.NodeKey)
 	}
 }
 
