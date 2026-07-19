@@ -92,7 +92,11 @@ func (e *Engine) activateAgentNode(ctx context.Context, run db.WorkflowRun, snap
 
 	note := e.buildHandoffNote(ctx, run, snap, node, step, reworkCtx)
 
-	creator := ParseRunContext(run.Context).Initiator()
+	// initiator stays raw for attribution (invalid => owner_fallback /
+	// fail-closed per MUL-4302); creator is coerced to the zero-UUID
+	// system-actor convention for issue CreatorID.
+	initiator := ParseRunContext(run.Context).Initiator()
+	creator := initiator
 	if !creator.Valid {
 		creator = pgtype.UUID{Valid: true} // system-actor zero UUID convention
 	}
@@ -115,7 +119,7 @@ func (e *Engine) activateAgentNode(ctx context.Context, run db.WorkflowRun, snap
 	}
 	issue := res.Issue
 
-	task, err := e.Tasks.EnqueueTaskForIssueWithHandoff(ctx, issue, note)
+	task, err := e.Tasks.EnqueueTaskForIssueWithHandoff(ctx, issue, note, initiator)
 	if err != nil {
 		return e.failActivation(ctx, run, step, fmt.Errorf("enqueue node task: %w", err))
 	}

@@ -1,5 +1,18 @@
 package workflow
 
+// Referential integrity: the workflow tables (migration 901) carry NO
+// database-level foreign keys or cascading actions — repo hard rule
+// (AGENTS.md / CLAUDE.md). Relationships are enforced here in the
+// application layer: the engine writes parents before children inside one
+// transaction (creation order: template -> run -> step_instance ->
+// submission -> verdict, with acceptance/step_transition alongside their
+// step), so a child row never commits without its parent.
+//
+// Known gap: workspace-delete cleanup of workflow rows is NOT implemented
+// — it is a P1 integration point tracked in the task's follow-ups
+// (previously ON DELETE CASCADE on workspace_id). Until then, deleting a
+// workspace leaves orphaned workflow rows.
+
 import (
 	"context"
 	"encoding/json"

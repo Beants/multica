@@ -1,5 +1,6 @@
--- Drop the workflow engine core schema. Reverse dependency order; indexes
--- and constraints created inline go away with their tables.
+-- Drop the workflow engine core schema. Reverse dependency order. Indexes
+-- live in their own migrations (902-925) and are dropped by their down
+-- files before this one runs; dropping the tables clears anything left.
 DROP TABLE IF EXISTS step_transition;
 DROP TABLE IF EXISTS acceptance;
 DROP TABLE IF EXISTS verdict;
