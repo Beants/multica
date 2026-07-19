@@ -1,0 +1,440 @@
+"use client";
+
+// template-detail-page.tsx — /{slug}/workflows/templates/{id}: the form-based
+// template editor (R7; explicitly NOT a canvas — the node canvas is P3).
+// Drafts edit name/description + the ordered node list inline; publish
+// freezes the graph server-side; published/archived templates render
+// read-only (the server enforces the same rule with 409).
+
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { AlertCircle, Archive, Plus, Workflow } from "lucide-react";
+import { toast } from "sonner";
+import { workflowTemplateDetailOptions } from "@multica/core/workflows/queries";
+import {
+  useArchiveWorkflowTemplate,
+  usePublishWorkflowTemplate,
+  useUpdateWorkflowTemplate,
+} from "@multica/core/workflows/mutations";
+import { useWorkflowEngineFlag } from "@multica/core/workflows/flag";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
+import type {
+  WorkflowNodeInput,
+  WorkflowTemplateDetail,
+} from "@multica/core/workflows/types";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
+import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Textarea } from "@multica/ui/components/ui/textarea";
+import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
+import { CollectionPageState } from "../../layout/collection-page";
+import { useT } from "../../i18n";
+import { TemplateStatusBadge } from "./status-badges";
+import { NodeEditorCard, emptyNode, type EditableNode } from "./node-editor";
+
+// Orders the node list by walking the edge chain from the head (the node
+// with no incoming edge). P0 chains are linear; a malformed/broken chain
+// falls back to the server's array order so nothing is silently dropped.
+function orderNodes(detail: WorkflowTemplateDetail) {
+  const nodes = detail.nodes;
+  if (nodes.length === 0 || detail.edges.length === 0) return nodes;
+  const hasIncoming = new Set(detail.edges.map((e) => e.to_node_key));
+  const nextByFrom = new Map(detail.edges.map((e) => [e.from_node_key, e.to_node_key]));
+  const head = nodes.find((n) => !hasIncoming.has(n.node_key));
+  if (!head) return nodes;
+  const byKey = new Map(nodes.map((n) => [n.node_key, n]));
+  const ordered = [];
+  let cursor: string | undefined = head.node_key;
+  const seen = new Set<string>();
+  while (cursor !== undefined && !seen.has(cursor)) {
+    seen.add(cursor);
+    const node = byKey.get(cursor);
+    if (!node) break;
+    ordered.push(node);
+    cursor = nextByFrom.get(cursor);
+  }
+  return ordered.length === nodes.length ? ordered : nodes;
+}
+
+function toEditable(detail: WorkflowTemplateDetail): EditableNode[] {
+  return orderNodes(detail).map((n) => {
+    const cfg = n.config ?? {};
+    return {
+      node_key: n.node_key,
+      type: n.type,
+      name: n.name,
+      role: cfg.role ?? "executor",
+      agent_selector: cfg.agent_selector ?? cfg.agent_id ?? "",
+      instructions: cfg.instructions ?? "",
+      max_attempts: cfg.max_attempts ?? 0,
+      auto_pass: cfg.auto_pass === true,
+      exit_fields: (cfg.exit_fields?.fields ?? []).map((f) => ({
+        name: f.name,
+        type: f.type || "any",
+        required: f.required === true,
+        description: f.description ?? "",
+      })),
+    };
+  });
+}
+
+// Derives the linear edge list from list order (P0: condition-less default
+// edges). The server requires nodes+edges together on a graph rewrite.
+function deriveEdges(nodes: EditableNode[]) {
+  return nodes.slice(0, -1).map((n, i) => ({
+    from_node_key: n.node_key,
+    to_node_key: nodes[i + 1]!.node_key,
+  }));
+}
+
+// Client-side mirror of the server's create/update graph validation, so the
+// obvious 400s surface as a toast before the round-trip.
+function validateNodes(nodes: EditableNode[]): string | null {
+  if (nodes.length === 0) return "at least one node is required";
+  const keys = new Set<string>();
+  for (const n of nodes) {
+    if (n.node_key.trim() === "") return "node_key is required";
+    if (keys.has(n.node_key)) return `duplicate node_key "${n.node_key}"`;
+    keys.add(n.node_key);
+    if (n.name.trim() === "") return `node "${n.node_key}" requires a name`;
+    if (n.type === "agent" && n.agent_selector.trim() === "")
+      return `node "${n.node_key}" requires an agent selector`;
+    for (const f of n.exit_fields) {
+      if (f.name.trim() === "") return `node "${n.node_key}" has an exit field with an empty name`;
+    }
+  }
+  return null;
+}
+
+function toNodeInputs(nodes: EditableNode[]): WorkflowNodeInput[] {
+  return nodes.map((n) => {
+    const isAgent = n.type === "agent";
+    const fields = n.exit_fields.filter((f) => f.name.trim() !== "");
+    return {
+      node_key: n.node_key.trim(),
+      type: n.type,
+      name: n.name.trim(),
+      config: {
+        ...(isAgent ? { role: n.role as "executor" | "evaluator" | "reviewer" } : {}),
+        ...(isAgent && n.agent_selector.trim() !== ""
+          ? { agent_selector: n.agent_selector.trim() }
+          : {}),
+        ...(isAgent && n.instructions.trim() !== "" ? { instructions: n.instructions } : {}),
+        ...(isAgent && n.max_attempts > 0 ? { max_attempts: n.max_attempts } : {}),
+        ...(n.type === "acceptance" && n.auto_pass === true ? { auto_pass: true } : {}),
+        ...(fields.length > 0
+          ? {
+              exit_fields: {
+                fields: fields.map((f) => ({
+                  name: f.name.trim(),
+                  type: f.type,
+                  ...(f.required === true ? { required: true } : {}),
+                  ...(f.description.trim() !== "" ? { description: f.description.trim() } : {}),
+                })),
+              },
+            }
+          : {}),
+      },
+    };
+  });
+}
+
+// Read-only node summary for published/archived templates.
+function NodeSummary({ node, index }: { node: EditableNode; index: number }) {
+  const { t } = useT("workflows");
+  const typeLabels: Record<string, string> = {
+    agent: t(($) => $.detail.node_type_agent),
+    acceptance: t(($) => $.detail.node_type_acceptance),
+    end: t(($) => $.detail.node_type_end),
+  };
+  const roleLabels: Record<string, string> = {
+    executor: t(($) => $.detail.role_executor),
+    evaluator: t(($) => $.detail.role_evaluator),
+    reviewer: t(($) => $.detail.role_reviewer),
+  };
+  return (
+    <div className="flex flex-col gap-1 rounded-lg border border-border p-3">
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-muted-foreground tabular-nums">{index + 1}.</span>
+        <span className="font-mono text-xs">{node.node_key}</span>
+        <span className="font-medium">{node.name}</span>
+        <span className="text-xs text-muted-foreground">{typeLabels[node.type] ?? node.type}</span>
+        {node.type === "agent" && (
+          <span className="text-xs text-muted-foreground">
+            {roleLabels[node.role] ?? node.role} · {node.agent_selector}
+          </span>
+        )}
+      </div>
+      {node.instructions !== "" && (
+        <p className="text-xs text-muted-foreground">{node.instructions}</p>
+      )}
+      {node.exit_fields.length > 0 && (
+        <p className="font-mono text-xs text-muted-foreground">
+          {node.exit_fields
+            .map((f) => `${f.name}${f.required === true ? "*" : ""}: ${f.type}`)
+            .join(", ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function TemplateEditor({ template }: { template: WorkflowTemplateDetail }) {
+  const { t } = useT("workflows");
+  const updateTemplate = useUpdateWorkflowTemplate();
+  const publishTemplate = usePublishWorkflowTemplate();
+
+  const [name, setName] = useState(template.name);
+  const [description, setDescription] = useState(template.description);
+  const [nodes, setNodes] = useState<EditableNode[]>(() => toEditable(template));
+
+  const patchNode = (index: number, next: EditableNode) =>
+    setNodes((prev) => prev.map((n, i) => (i === index ? next : n)));
+  const moveNode = (index: number, delta: -1 | 1) =>
+    setNodes((prev) => {
+      const target = index + delta;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[target]] = [next[target]!, next[index]!];
+      return next;
+    });
+  const removeNode = (index: number) =>
+    setNodes((prev) => prev.filter((_, i) => i !== index));
+
+  const save = () => {
+    if (updateTemplate.isPending) return;
+    const invalid = validateNodes(nodes);
+    if (invalid !== null) {
+      toast.error(invalid);
+      return;
+    }
+    updateTemplate.mutate(
+      {
+        id: template.id,
+        name: name.trim(),
+        description: description.trim(),
+        nodes: toNodeInputs(nodes),
+        edges: deriveEdges(nodes),
+      },
+      {
+        onSuccess: () => toast.success(t(($) => $.detail.save_success)),
+        onError: (err) =>
+          toast.error(err instanceof Error ? err.message : t(($) => $.detail.save_error)),
+      },
+    );
+  };
+
+  const publish = () => {
+    if (publishTemplate.isPending) return;
+    publishTemplate.mutate(template.id, {
+      onSuccess: () => toast.success(t(($) => $.detail.publish_success)),
+      onError: (err) =>
+        toast.error(err instanceof Error ? err.message : t(($) => $.detail.publish_error)),
+    });
+  };
+
+  return (
+    <div className="flex flex-1 flex-col gap-4 overflow-auto p-5">
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="wf-tpl-name">{t(($) => $.detail.name_label)}</Label>
+        <Input id="wf-tpl-name" value={name} onChange={(e) => setName(e.target.value)} />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="wf-tpl-desc">{t(($) => $.detail.desc_label)}</Label>
+        <Textarea
+          id="wf-tpl-desc"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={2}
+        />
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-medium">{t(($) => $.detail.nodes_title)}</h2>
+            <p className="text-xs text-muted-foreground">{t(($) => $.detail.nodes_hint)}</p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setNodes((prev) => [...prev, emptyNode(prev.length)])}
+          >
+            <Plus aria-hidden="true" className="size-3.5" />
+            {t(($) => $.detail.add_node)}
+          </Button>
+        </div>
+        {nodes.map((node, i) => (
+          <NodeEditorCard
+            key={`${i}-${node.node_key}`}
+            node={node}
+            index={i}
+            total={nodes.length}
+            onChange={(next) => patchNode(i, next)}
+            onMove={moveNode}
+            onRemove={removeNode}
+          />
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          onClick={save}
+          disabled={updateTemplate.isPending || name.trim() === ""}
+        >
+          {t(($) => $.detail.save)}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={publish}
+          disabled={publishTemplate.isPending}
+        >
+          {t(($) => $.detail.publish)}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function TemplateReadonly({ template }: { template: WorkflowTemplateDetail }) {
+  const { t } = useT("workflows");
+  const nodes = toEditable(template);
+  return (
+    <div className="flex flex-1 flex-col gap-4 overflow-auto p-5">
+      <p className="text-xs text-muted-foreground">
+        {template.status === "archived"
+          ? t(($) => $.detail.readonly_archived_hint)
+          : t(($) => $.detail.readonly_published_hint)}
+      </p>
+      {template.description !== "" && (
+        <p className="text-sm text-muted-foreground">{template.description}</p>
+      )}
+      <div className="flex flex-col gap-2">
+        <h2 className="text-sm font-medium">{t(($) => $.detail.nodes_title)}</h2>
+        {nodes.map((node, i) => (
+          <NodeSummary key={`${i}-${node.node_key}`} node={node} index={i} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function TemplateDetailPage({ templateId }: { templateId: string }) {
+  const { t } = useT("workflows");
+  const enabled = useWorkflowEngineFlag();
+  const wsId = useWorkspaceId();
+  const p = useWorkspacePaths();
+  const archiveTemplate = useArchiveWorkflowTemplate();
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const detailQuery = useQuery({
+    ...workflowTemplateDetailOptions(wsId, templateId),
+    enabled,
+  });
+
+  const archive = () => {
+    archiveTemplate.mutate(templateId, {
+      onSuccess: () => {
+        setArchiveOpen(false);
+        toast.success(t(($) => $.detail.archive_success));
+      },
+      onError: (err) =>
+        toast.error(err instanceof Error ? err.message : t(($) => $.detail.archive_error)),
+    });
+  };
+
+  if (!enabled) {
+    return (
+      <CollectionPageState
+        icon={Workflow}
+        title={t(($) => $.common.unavailable_title)}
+        description={t(($) => $.common.unavailable_hint)}
+      />
+    );
+  }
+
+  if (detailQuery.isPending) {
+    return (
+      <div className="flex flex-col gap-2 p-5">
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-24 w-full" />
+      </div>
+    );
+  }
+
+  if (detailQuery.isError || !detailQuery.data?.id) {
+    return (
+      <CollectionPageState
+        icon={AlertCircle}
+        tone="destructive"
+        title={t(($) => $.detail.not_found_title)}
+        description={t(($) => $.detail.not_found_hint)}
+      />
+    );
+  }
+
+  const template = detailQuery.data;
+  const readonly = template.status !== "draft";
+
+  return (
+    <div className="flex h-full flex-col">
+      <BreadcrumbHeader
+        segments={[{ href: p.workflows(), label: t(($) => $.detail.breadcrumb_templates) }]}
+        leaf={
+          <span className="flex items-center gap-2">
+            <span className="truncate">{template.name || t(($) => $.detail.unnamed_template)}</span>
+            <TemplateStatusBadge status={template.status} />
+            <span className="font-mono text-xs text-muted-foreground">{`v${template.version}`}</span>
+          </span>
+        }
+        actions={
+          template.status !== "archived" ? (
+            <Button size="sm" variant="outline" onClick={() => setArchiveOpen(true)}>
+              <Archive aria-hidden="true" className="size-3.5" />
+              {t(($) => $.detail.archive)}
+            </Button>
+          ) : undefined
+        }
+      />
+      {/* Remount the editor when the server row changes (save/publish
+          refetch bumps updated_at) so local form state re-seeds from the
+          authoritative payload instead of drifting. */}
+      {readonly ? (
+        <TemplateReadonly template={template} />
+      ) : (
+        <TemplateEditor key={`${template.id}:${template.updated_at}`} template={template} />
+      )}
+
+      <AlertDialog open={archiveOpen} onOpenChange={setArchiveOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t(($) => $.detail.archive_confirm_title)}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.detail.archive_confirm_body)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t(($) => $.common.cancel)}</AlertDialogCancel>
+            <AlertDialogAction onClick={archive} disabled={archiveTemplate.isPending}>
+              {t(($) => $.detail.archive_confirm_action)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
