@@ -38,6 +38,14 @@ const (
 	RoleReviewer  = "reviewer"
 )
 
+// Fail policies for fan_out node config (NodeConfig.FailPolicy). Empty /
+// unset is treated as FailPolicyRework by EffectiveFailPolicy.
+const (
+	FailPolicyFail    = "fail"    // any child fails → all siblings skipped, run failed
+	FailPolicyBlocked = "blocked" // any child fails/blocked → run blocked, inbox reviewer
+	FailPolicyRework  = "rework"  // failed child attempt++ (siblings unaffected) — default
+)
+
 const defaultMaxAttempts = 3
 
 // ExitFieldSpec declares one expected exit field on a node. Type is a JSON
@@ -69,6 +77,17 @@ type NodeConfig struct {
 	// notifies at activation. The hook payload's reviewer (run context) takes
 	// precedence; this is the template-level default.
 	ReviewerID string `json:"reviewer_id,omitempty"`
+
+	// ItemsField names the array exit_field on the upstream node that fan_out
+	// consumes to expand N child steps. Required for fan_out nodes; ignored
+	// elsewhere. The referenced field must exist on the upstream node's
+	// ExitFieldsSchema with type=array (validated at publish).
+	ItemsField string `json:"items_field,omitempty"`
+
+	// FailPolicy governs how fan_out handles a failed child step. Default
+	// (empty / unset, see EffectiveFailPolicy) is FailPolicyRework. Only
+	// meaningful on fan_out nodes.
+	FailPolicy string `json:"fail_policy,omitempty"`
 }
 
 // EffectiveRole defaults an unset role to executor (design.md §4.3).
@@ -85,6 +104,16 @@ func (c NodeConfig) EffectiveMaxAttempts() int32 {
 		return defaultMaxAttempts
 	}
 	return c.MaxAttempts
+}
+
+// EffectiveFailPolicy applies the fan_out default fail policy. Empty /
+// unset → FailPolicyRework; any explicit value is returned as-is (the
+// enum was validated at ParseNodeConfig time).
+func (c NodeConfig) EffectiveFailPolicy() string {
+	if c.FailPolicy == "" {
+		return FailPolicyRework
+	}
+	return c.FailPolicy
 }
 
 // ParseNodeConfig decodes a node config blob, tolerating unknown fields
@@ -113,6 +142,11 @@ func ParseNodeConfig(raw []byte) (NodeConfig, error) {
 				return NodeConfig{}, fmt.Errorf("node config: exit field %q has unknown type %q", f.Name, f.Type)
 			}
 		}
+	}
+	switch cfg.FailPolicy {
+	case "", FailPolicyFail, FailPolicyBlocked, FailPolicyRework:
+	default:
+		return NodeConfig{}, fmt.Errorf("node config: unknown fail_policy %q", cfg.FailPolicy)
 	}
 	return cfg, nil
 }
@@ -357,9 +391,12 @@ func NewTemplateService(q *db.Queries, tx TxStarter) *TemplateService {
 //   - end: == 0 (terminal)
 //
 // In-degree rules: converge allows ≥ 1 inbound (the multi-inbound case is
-// the AND-join; the fan_out↔converge pairing check is Wave 1's job, this
-// validator only admits the shape). All other types expect exactly 1
-// inbound except the single start node (in-degree 0).
+// the AND-join; Wave 1's ValidateConvergePairing enforces the
+// fan_out↔converge pairing on top of this shape check). All other types
+// expect exactly 1 inbound except the single start node (in-degree 0).
+//
+// Wave 1 also enforces fan_out config semantics via ValidateFanOutConfig
+// (items_field must point at an array field declared on an upstream node).
 //
 // P0 linear templates satisfy this unchanged (out-degree 1 everywhere
 // except the end node), so the upgrade is backward-compatible.
@@ -368,6 +405,7 @@ func validateTemplateGraph(nodes []NodeInput, edges []EdgeInput) error {
 		return errors.New("workflow: at least one node is required")
 	}
 	keys := make(map[string]bool, len(nodes))
+	cfgByKey := make(map[string]NodeConfig, len(nodes))
 	for _, n := range nodes {
 		if n.NodeKey == "" {
 			return errors.New("workflow: node_key is required")
@@ -388,6 +426,7 @@ func validateTemplateGraph(nodes []NodeInput, edges []EdgeInput) error {
 		if err != nil {
 			return fmt.Errorf("workflow: node %q: %w", n.NodeKey, err)
 		}
+		cfgByKey[n.NodeKey] = cfg
 		if n.Type == NodeTypeAgent && cfg.AgentSelector == "" && cfg.AgentID == "" {
 			return fmt.Errorf("workflow: agent node %q requires agent_selector", n.NodeKey)
 		}
@@ -420,6 +459,17 @@ func validateTemplateGraph(nodes []NodeInput, edges []EdgeInput) error {
 			if got > 1 {
 				return fmt.Errorf("workflow: node %q has %d outgoing edges, want at most 1 (only fan_out may branch)", n.NodeKey, got)
 			}
+		}
+	}
+	// Wave 1: fan_out config (items_field + upstream array declaration).
+	// Runs AFTER the out-degree check so a branchless fan_out reports its
+	// structural problem before its config problem (tighter error message).
+	for _, n := range nodes {
+		if n.Type != NodeTypeFanOut {
+			continue
+		}
+		if err := ValidateFanOutConfig(n, cfgByKey[n.NodeKey], nodes, edges); err != nil {
+			return err
 		}
 	}
 	// Exactly one start node (in-degree 0). Zero starts means the graph is
@@ -474,6 +524,11 @@ func validateTemplateGraph(nodes []NodeInput, edges []EdgeInput) error {
 		if color[n.NodeKey] == white {
 			return fmt.Errorf("workflow: node %q is unreachable from the start node", n.NodeKey)
 		}
+	}
+	// Wave 1: fan_out↔converge pairing. Runs after the structural graph
+	// check so cycle/orphan errors surface first.
+	if err := ValidateConvergePairing(nodes, edges); err != nil {
+		return err
 	}
 	return nil
 }

@@ -55,9 +55,16 @@ func TestValidateGraphDAG_LinearPreserved(t *testing.T) {
 func TestValidateGraphDAG_FanOutAllowed(t *testing.T) {
 	t.Parallel()
 	// fan_out branches into two siblings that re-converge: classic P1 shape.
+	// Wave 1 tightens the rules — fan_out must declare items_field and the
+	// upstream must declare the matching array exit_field — so this fixture
+	// carries a complete, publishable fan_out subgraph.
+	upstream := agentNode("upstream", RoleExecutor, "Agent", NodeConfig{
+		ExitFields: &ExitFieldsSchema{Fields: []ExitFieldSpec{{Name: "subtasks", Type: "array"}}},
+	})
+	fanOut := typedNode("fanout", NodeTypeFanOut, NodeConfig{ItemsField: "subtasks"})
 	nodes := []NodeInput{
-		agentNode("upstream", RoleExecutor, "Agent", NodeConfig{}),
-		fanOutNode("fanout"),
+		upstream,
+		fanOut,
 		agentNode("branchA", RoleExecutor, "Agent", NodeConfig{}),
 		agentNode("branchB", RoleExecutor, "Agent", NodeConfig{}),
 		convergeNode("converge"),
@@ -76,28 +83,34 @@ func TestValidateGraphDAG_FanOutAllowed(t *testing.T) {
 	}
 }
 
-func TestValidateGraphDAG_FanOutWithoutConvergeStillValidates(t *testing.T) {
+func TestValidateGraphDAG_FanOutWithoutConvergeRejected(t *testing.T) {
 	t.Parallel()
-	// Wave 0's validator admits the SHAPE; fan_out↔converge pairing is
-	// Wave 1's publish-time concern. A fan_out whose branches never
-	// re-converge (each branch ends in its own end) is structurally legal.
+	// Wave 0 admitted this shape structurally; Wave 1's pairing rule
+	// (ValidateConvergePairing) rejects any fan_out whose branches never
+	// reach a converge node. The items_field on fan_out + upstream schema
+	// are valid so the failure isolates the pairing rule.
+	upstream := agentNode("upstream", RoleExecutor, "Agent", NodeConfig{
+		ExitFields: &ExitFieldsSchema{Fields: []ExitFieldSpec{{Name: "subtasks", Type: "array"}}},
+	})
+	fanOut := typedNode("fanout", NodeTypeFanOut, NodeConfig{ItemsField: "subtasks"})
 	nodes := []NodeInput{
-		fanOutNode("fanout"),
+		upstream,
+		fanOut,
 		agentNode("branchA", RoleExecutor, "Agent", NodeConfig{}),
 		agentNode("branchB", RoleExecutor, "Agent", NodeConfig{}),
 		typedNode("endA", NodeTypeEnd, NodeConfig{}),
 		typedNode("endB", NodeTypeEnd, NodeConfig{}),
 	}
 	edges := dagEdges(
+		"upstream", "fanout",
 		"fanout", "branchA",
 		"fanout", "branchB",
 		"branchA", "endA",
 		"branchB", "endB",
 	)
-	// TWO start-free structure: fanout is the only in-degree-0 node. But
-	// endA/endB both terminal — this is a valid DAG shape.
-	if err := validateTemplateGraph(nodes, edges); err != nil {
-		t.Fatalf("fan_out without converge must still validate structurally: %v", err)
+	err := validateTemplateGraph(nodes, edges)
+	if err == nil || !strings.Contains(err.Error(), "no downstream path to a converge") {
+		t.Fatalf("branchless fan_out = %v, want pairing error", err)
 	}
 }
 
