@@ -110,7 +110,14 @@ export function CreateHookDialog({
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label>{t(($) => $.hooks.template_label)}</Label>
-                <Select value={templateId} onValueChange={(v) => setTemplateId(v ?? "")}>
+                <Select
+                  items={published.map((tmpl) => ({
+                    value: tmpl.id,
+                    label: `${tmpl.name || tmpl.key} (v${tmpl.version})`,
+                  }))}
+                  value={templateId}
+                  onValueChange={(v) => setTemplateId(v ?? "")}
+                >
                   <SelectTrigger className="w-full" aria-label={t(($) => $.hooks.template_label)}>
                     <SelectValue>
                       {templateId === ""

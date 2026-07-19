@@ -140,7 +140,14 @@ export function AcceptancePanel({
             <div className="flex flex-col gap-2">
               <div className="flex flex-col gap-1.5">
                 <Label className="text-xs">{t(($) => $.run.reject_to_label)}</Label>
-                <Select value={rejectTo} onValueChange={(v) => setRejectTo(v ?? "")}>
+                <Select
+                  items={targetOptions.map((key) => ({
+                    value: key,
+                    label: nodeNameByKey.get(key) ?? key,
+                  }))}
+                  value={rejectTo}
+                  onValueChange={(v) => setRejectTo(v ?? "")}
+                >
                   <SelectTrigger
                     size="sm"
                     className="w-full"

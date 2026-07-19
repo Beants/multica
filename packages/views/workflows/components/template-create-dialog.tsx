@@ -145,7 +145,11 @@ export function TemplateCreateDialog({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>{t(($) => $.detail.agent_selector_label)}</Label>
-            <Select value={agentName} onValueChange={(v) => setAgentName(v ?? "")}>
+            <Select
+              items={agents.map((a) => ({ value: a.name, label: a.name }))}
+              value={agentName}
+              onValueChange={(v) => setAgentName(v ?? "")}
+            >
               <SelectTrigger className="w-full" aria-label={t(($) => $.detail.agent_selector_label)}>
                 <SelectValue>
                   {agentName || t(($) => $.detail.agent_selector_placeholder)}

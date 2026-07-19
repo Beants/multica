@@ -83,6 +83,10 @@ function ExitFieldRow({
         className="w-36 font-mono text-xs"
       />
       <Select
+        items={EXIT_FIELD_TYPES.map((ft) => ({
+          value: ft,
+          label: typeLabels[ft] ?? ft,
+        }))}
         value={field.type}
         onValueChange={(v) => onChange({ ...field, type: v ?? "any" })}
       >
@@ -172,6 +176,10 @@ export function NodeEditorCard({
           className="flex-1"
         />
         <Select
+          items={["agent", "acceptance", "end"].map((nt) => ({
+            value: nt,
+            label: typeLabels[nt] ?? nt,
+          }))}
           value={node.type}
           onValueChange={(v) => onChange({ ...node, type: v ?? "agent" })}
         >
@@ -221,6 +229,10 @@ export function NodeEditorCard({
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs">{t(($) => $.detail.role_label)}</Label>
               <Select
+                items={["executor", "evaluator", "reviewer"].map((r) => ({
+                  value: r,
+                  label: roleLabels[r] ?? r,
+                }))}
                 value={node.role}
                 onValueChange={(v) => onChange({ ...node, role: v ?? "executor" })}
               >
