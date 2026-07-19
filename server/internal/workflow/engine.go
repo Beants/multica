@@ -356,13 +356,27 @@ func (e *Engine) StartRun(ctx context.Context, p StartRunParams) (db.WorkflowRun
 // signalAction describes the post-commit side effects of one consumed
 // verdict. Phase 1 (state machine) runs inside the transaction; phase 2
 // (issue flips, dispatch, notifications) runs after commit.
+//
+// Wave 0 lifted the P0 single-downstream invariant: NextAfterAll returns
+// a slice, so the consume/acceptance loops can iterate >1 downstream
+// (the fan_out case). nextNodes/nextSteps carry every activated pair so
+// post-commit dispatch (runSignalAction / emitSignalEvents) reaches all
+// of them — the pre-refactor single-pair fields silently dropped every
+// downstream after the first under fan_out (P1-1 Wave 2.0).
 type signalAction struct {
-	kind     string // advance | retry | escalate | blocked | complete | none
-	run      db.WorkflowRun
-	snap     *Snapshot
-	prevStep db.StepInstance // the step that just terminated
-	nextNode *SnapshotNode   // advance/retry: node to activate
-	nextStep db.StepInstance // advance/retry: its fresh active step
+	kind      string // advance | retry | escalate | blocked | complete | none
+	run       db.WorkflowRun
+	snap      *Snapshot
+	prevStep  db.StepInstance   // the step that just terminated
+	nextNodes []*SnapshotNode   // advance/retry: every downstream node activated
+	nextSteps []db.StepInstance // advance/retry: their fresh active step rows
+
+	// Wave 2: emitted by handleChildStepTerminal when a fan_out child
+	// step's terminal transition triggered a converge state change.
+	// Set only when prevStep has ParentStepID.Valid; null otherwise.
+	// When non-nil, kind is demoted to "none" (converge owns downstream
+	// activation) and runSignalAction processes the effect after commit.
+	converge *convergeEffect
 }
 
 // SignalVerdict consumes the verdict currently attached to a step and
@@ -437,12 +451,23 @@ func (e *Engine) consumeVerdictTx(ctx context.Context, stepInstanceID pgtype.UUI
 		if !e.transitionStepTx(ctx, qtx, step, StepPassed, "verdict", verdictPayload(verdict)) {
 			return none, nil // lost the guard race; another consumer advanced
 		}
-		if next := snap.NextAfterAll(step.NodeKey); len(next) > 0 {
+		// Wave 2: fan_out child step reached a verdict outcome. The
+		// converge hook runs inside this tx and decides whether to
+		// fire the post-converge chain or apply a fail policy. When it
+		// fires, kind is demoted to "none" (converge owns downstream)
+		// and the effect carries the post-commit work.
+		if step.ParentStepID.Valid {
+			effect, err := e.handleChildStepTerminal(ctx, qtx, run, step, StepPassed)
+			if err != nil {
+				return none, err
+			}
+			action.converge = effect
+		} else if next := snap.NextAfterAll(step.NodeKey); len(next) > 0 {
 			// Wave 0 P0 invariant: agent/acceptance nodes have out-degree
-			// 1, so this loop runs once. fan_out would branch (N>1) but
-			// fan_out activation lands in Wave 2 — for now the loop body's
-			// action.nextNode/nextStep assignment picks the last iter, which
-			// is fine because the slice has exactly one element here.
+			// 1, so this loop runs once for linear templates. fan_out
+			// branches (N>1) and would have collapsed to the last iter
+			// pre-refactor; the slice-based signalAction keeps every
+			// activated downstream reachable post-commit.
 			for _, nxt := range next {
 				nextStep, err := activateStepTx(ctx, qtx, run.ID, nxt.NodeKey)
 				if err != nil {
@@ -454,8 +479,10 @@ func (e *Engine) consumeVerdictTx(ctx context.Context, stepInstanceID pgtype.UUI
 					}
 				}
 				n := nxt // capture for address (Go loop var safety)
-				action.kind, action.nextNode, action.nextStep = "advance", &n, nextStep
+				action.nextNodes = append(action.nextNodes, &n)
+				action.nextSteps = append(action.nextSteps, nextStep)
 			}
+			action.kind = "advance"
 		} else {
 			// Chain tail passed: no end node modeled — complete the run.
 			action.kind = "complete"
@@ -470,20 +497,63 @@ func (e *Engine) consumeVerdictTx(ctx context.Context, stepInstanceID pgtype.UUI
 			if err != nil {
 				return none, err
 			}
-			action.kind, action.nextNode, action.nextStep = "retry", node, fresh
+			action.kind = "retry"
+			action.nextNodes = []*SnapshotNode{node}
+			action.nextSteps = []db.StepInstance{fresh}
 		} else {
 			if !e.transitionStepTx(ctx, qtx, step, StepFailed, "verdict", verdictPayload(verdict)) {
 				return none, nil
 			}
+			// Wave 2: fan_out child definitive fail (max attempts
+			// exhausted). The fan_out's fail_policy decides the next
+			// move; for fail/blocked the run is already paused/failed
+			// inside applyFailPolicy, for rework the post-commit path
+			// calls reworkChildStepScope. None of these need the P0
+			// escalate handoff, so we short-circuit before pauseRunTx.
+			if step.ParentStepID.Valid {
+				effect, err := e.handleChildStepTerminal(ctx, qtx, run, step, StepFailed)
+				if err != nil {
+					return none, err
+				}
+				action.converge = effect
+				if err := tx.Commit(ctx); err != nil {
+					return none, fmt.Errorf("commit: %w", err)
+				}
+				return action, nil
+			}
 			if !e.pauseRunTx(ctx, qtx, run) {
 				return none, nil
 			}
-			action.kind, action.nextNode = "escalate", node
+			action.kind = "escalate"
+			action.nextNodes = []*SnapshotNode{node}
 		}
 
 	case VerdictBlocked:
 		if !e.transitionStepTx(ctx, qtx, step, StepBlocked, "verdict", verdictPayload(verdict)) {
 			return none, nil
+		}
+		// Wave 2: fan_out child blocked — converge fail_policy may
+		// fire (fail/blocked policies treat blocked as a non-pass
+		// outcome; policy=rework defers to P0 pause). When the policy
+		// applies, it sets the run state itself and consumeVerdictTx
+		// must NOT fall through to pauseRunTx — doing so would roll
+		// the whole tx back via the early `return none, nil` pattern
+		// (defer Rollback fires when Commit hasn't).
+		if step.ParentStepID.Valid {
+			effect, err := e.handleChildStepTerminal(ctx, qtx, run, step, StepBlocked)
+			if err != nil {
+				return none, err
+			}
+			action.converge = effect
+			if effect != nil && effect.kind != convergeKindHeld {
+				// Policy took over the run state — commit + return.
+				if err := tx.Commit(ctx); err != nil {
+					return none, fmt.Errorf("commit: %w", err)
+				}
+				return action, nil
+			}
+			// policy=rework with blocked verdict: effect held. Fall
+			// through to P0 pause.
 		}
 		if !e.pauseRunTx(ctx, qtx, run) {
 			return none, nil
@@ -509,20 +579,37 @@ func (e *Engine) runSignalAction(ctx context.Context, a signalAction) error {
 	}
 	switch a.kind {
 	case "none":
-		return nil
+		// No P0-style advance, but a Wave 2 converge effect may still
+		// need post-commit work (converge pass-through, fail-policy
+		// notifications, child rework dispatch).
+		return e.runConvergeEffect(ctx, a)
 	case "advance":
 		e.closeStepIssue(ctx, a.prevStep, "done")
-		return e.activateNode(ctx, a.run, a.snap, a.nextNode, a.nextStep, nil)
+		for i := range a.nextNodes {
+			if err := e.activateNode(ctx, a.run, a.snap, a.nextNodes[i], a.nextSteps[i], nil); err != nil {
+				return err
+			}
+		}
+		return e.runConvergeEffect(ctx, a)
 	case "complete":
 		e.closeStepIssue(ctx, a.prevStep, "done")
 		return e.completeRun(ctx, a.run)
 	case "retry":
 		e.closeStepIssue(ctx, a.prevStep, "cancelled")
-		return e.activateNode(ctx, a.run, a.snap, a.nextNode, a.nextStep, nil)
+		for i := range a.nextNodes {
+			if err := e.activateNode(ctx, a.run, a.snap, a.nextNodes[i], a.nextSteps[i], nil); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "escalate":
 		e.closeStepIssue(ctx, a.prevStep, "cancelled")
+		var maxAttempts int32
+		if len(a.nextNodes) > 0 {
+			maxAttempts = a.nextNodes[0].Config.EffectiveMaxAttempts()
+		}
 		e.handoffToHuman(ctx, a.run,
-			fmt.Sprintf("Workflow paused: node %q failed attempt %d of %d", a.prevStep.NodeKey, a.prevStep.Attempt, a.nextNode.Config.EffectiveMaxAttempts()),
+			fmt.Sprintf("Workflow paused: node %q failed attempt %d of %d", a.prevStep.NodeKey, a.prevStep.Attempt, maxAttempts),
 			"workflow_escalated")
 		return nil
 	case "blocked":
@@ -530,6 +617,56 @@ func (e *Engine) runSignalAction(ctx context.Context, a signalAction) error {
 			fmt.Sprintf("Workflow paused: node %q is blocked", a.prevStep.NodeKey),
 			map[string]any{"run_id": util.UUIDToString(a.run.ID), "node_key": a.prevStep.NodeKey})
 		return nil
+	}
+	return nil
+}
+
+// runConvergeEffect processes the Wave 2 converge effect (if any)
+// queued by handleChildStepTerminal. Called from runSignalAction
+// after the original transition's events are emitted.
+func (e *Engine) runConvergeEffect(ctx context.Context, a signalAction) error {
+	if a.converge == nil {
+		return nil
+	}
+	c := a.converge
+	switch c.kind {
+	case convergeKindHeld:
+		return nil
+	case convergeKindPassed:
+		// Converge went pending → passed; downstream step was activated
+		// in-tx. Emit events for both, then dispatch the downstream node.
+		e.publishStepUpdated(c.run, c.convergeStepID, c.convergeStatus)
+		if c.downstreamNode != nil && c.downstreamStep != nil {
+			e.publishStepUpdated(c.run, c.downstreamStep.ID, StepActive)
+			if err := e.activateNode(ctx, c.run, a.snap, c.downstreamNode, *c.downstreamStep, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	case convergeKindFailed:
+		// policy=fail: sibling skips + run failed were committed in-tx.
+		for _, sid := range c.skippedSiblings {
+			e.publishStepUpdated(c.run, sid, StepSkipped)
+		}
+		e.publishRunUpdated(c.run, RunFailed)
+		e.notifyInitiator(ctx, c.run, "workflow_failed", "action_required",
+			fmt.Sprintf("Workflow failed: fan_out child failed under policy=fail"),
+			map[string]any{"run_id": util.UUIDToString(c.run.ID)})
+		return nil
+	case convergeKindBlocked:
+		// policy=blocked: converge blocked + run paused in-tx.
+		if c.convergeStepID.Valid {
+			e.publishStepUpdated(c.run, c.convergeStepID, c.convergeStatus)
+		}
+		e.publishRunUpdated(c.run, RunPaused)
+		e.notifyInitiator(ctx, c.run, "workflow_blocked", "action_required",
+			fmt.Sprintf("Workflow paused: fan_out child failed under policy=blocked"),
+			map[string]any{"run_id": util.UUIDToString(c.run.ID)})
+		return nil
+	case convergeKindReworked:
+		// policy=rework: re-dispatch the failed child via the scoped
+		// helper (no DownstreamNodeKeys → no BFS leak, design §4.4).
+		return e.reworkChildStepScope(ctx, c.run, a.snap, c.branchNode, c.reworkTargetStep, c.fanOutNode)
 	}
 	return nil
 }
@@ -549,7 +686,9 @@ func (e *Engine) emitSignalEvents(a signalAction) {
 	e.publishStepUpdated(a.run, a.prevStep.ID, stepStatus)
 	switch a.kind {
 	case "advance", "retry":
-		e.publishStepUpdated(a.run, a.nextStep.ID, StepActive)
+		for i := range a.nextSteps {
+			e.publishStepUpdated(a.run, a.nextSteps[i].ID, StepActive)
+		}
 	case "escalate", "blocked":
 		e.publishRunUpdated(a.run, RunPaused)
 	}
@@ -858,9 +997,16 @@ func (e *Engine) ApproveAcceptance(ctx context.Context, runID, acceptanceID, dec
 	switch action.kind {
 	case "advance":
 		e.publishStepUpdated(action.run, action.prevStep.ID, StepPassed)
-		e.publishStepUpdated(action.run, action.nextStep.ID, StepActive)
+		for i := range action.nextSteps {
+			e.publishStepUpdated(action.run, action.nextSteps[i].ID, StepActive)
+		}
 		e.publishRunUpdated(action.run, RunRunning)
-		return e.activateNode(ctx, action.run, action.snap, action.nextNode, action.nextStep, nil)
+		for i := range action.nextNodes {
+			if err := e.activateNode(ctx, action.run, action.snap, action.nextNodes[i], action.nextSteps[i], nil); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "complete":
 		e.publishStepUpdated(action.run, action.prevStep.ID, StepPassed)
 		e.publishRunUpdated(action.run, RunRunning)
@@ -1016,8 +1162,10 @@ func (e *Engine) decideAcceptanceTx(ctx context.Context, runID, acceptanceID, de
 					}
 				}
 				n := nxt
-				action.kind, action.nextNode, action.nextStep = "advance", &n, nextStep
+				action.nextNodes = append(action.nextNodes, &n)
+				action.nextSteps = append(action.nextSteps, nextStep)
 			}
+			action.kind = "advance"
 		} else {
 			action.kind = "complete"
 		}

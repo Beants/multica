@@ -25,6 +25,14 @@ import (
 //   - acceptance: pending acceptance row + run → waiting_acceptance +
 //     reviewer inbox (§4.5). auto_pass is honored when the node opts in.
 //   - end:        run completion (§4.5).
+//   - fan_out:    pure splitter (P1-1 Wave 2). Reads upstream
+//     submission.exit_fields[items_field], expands N child step rows +
+//     child issues + agent dispatches inside one tx, then transitions
+//     itself to passed. See fanout.go.
+//   - converge:   pure AND-join (P1-1 Wave 2). Flips itself to pending
+//     and waits for the upstream fan_out's children to reach terminal
+//     outcomes; convergence fires from handleChildStepTerminal in
+//     consumeVerdictTx. See converge.go.
 
 // activateNode dispatches one already-active step by node type.
 // reworkCtx is non-nil only on rework rounds (D-8 explicit injection).
@@ -36,6 +44,10 @@ func (e *Engine) activateNode(ctx context.Context, run db.WorkflowRun, snap *Sna
 		return e.activateAcceptanceNode(ctx, run, node, step)
 	case NodeTypeEnd:
 		return e.activateEndNode(ctx, run, step)
+	case NodeTypeFanOut:
+		return e.activateFanOutNode(ctx, run, snap, node, step)
+	case NodeTypeConverge:
+		return e.activateConvergeNode(ctx, run, snap, node, step)
 	default:
 		return fmt.Errorf("workflow: unsupported P0 node type %q", node.Type)
 	}
