@@ -23,13 +23,15 @@ import (
 
 // Node types (workflow_node.type CHECK). fan_out/converge are accepted by
 // the DAG validator (P1-1 Wave 0) but not yet dispatched by activateNode
-// (Wave 2 adds the case branches). gate remains P1+ forward-compat only.
+// (Wave 2 adds the case branches). gate arrives in P1-3 (script form only;
+// the 901 type CHECK already carries it).
 const (
 	NodeTypeAgent      = "agent"
 	NodeTypeAcceptance = "acceptance"
 	NodeTypeEnd        = "end"
 	NodeTypeFanOut     = "fan_out"
 	NodeTypeConverge   = "converge"
+	NodeTypeGate       = "gate"
 )
 
 // Node roles (node config.role). executor is the default when unset.
@@ -45,6 +47,29 @@ const (
 	FailPolicyFail    = "fail"    // any child fails → all siblings skipped, run failed
 	FailPolicyBlocked = "blocked" // any child fails/blocked → run blocked, inbox reviewer
 	FailPolicyRework  = "rework"  // failed child attempt++ (siblings unaffected) — default
+)
+
+// Gate type / language / on_fail enums (P1-3 PRD R4). gate_type=script is
+// the only MVP-dispatched form; the other four values are accepted at
+// publish time so P1-3b activations land without a follow-up migration.
+const (
+	GateTypeScript     = "script"
+	GateTypeAgent      = "agent"
+	GateTypeRules      = "rules"
+	GateTypeAdversarial = "adversarial"
+	GateTypeHybrid     = "hybrid"
+
+	GateLanguageShell   = "shell"
+	GateLanguagePython3 = "python3"
+
+	GateOnFailBlock = "block" // block verdict → VerdictBlocked (default)
+	GateOnFailWarn  = "warn"  // block verdict → VerdictPass + evidence
+
+	gateInlineScriptMaxBytes = 4096
+	gateTimeoutMinSeconds    = 1
+	gateTimeoutMaxSeconds    = 300
+	gateDefaultTimeoutSec    = 60
+	gateDefaultMaxOutputBytes = 1048576
 )
 
 const defaultMaxAttempts = 3
@@ -89,6 +114,19 @@ type NodeConfig struct {
 	// (empty / unset, see EffectiveFailPolicy) is FailPolicyRework. Only
 	// meaningful on fan_out nodes.
 	FailPolicy string `json:"fail_policy,omitempty"`
+
+	// P1-3 gate node config (PRD R4). GateType is required on every gate
+	// node; the other five fields are gate_type=script parameters. Only
+	// GateType=script is dispatched in the MVP — the remaining forms
+	// (agent/rules/adversarial/hybrid) land in P1-3b but pass publish
+	// validation so a published template carrying them does not need a
+	// follow-up migration when P1-3b activates them.
+	GateType           string `json:"gate_type,omitempty"`
+	GateScriptRef      string `json:"gate_script_ref,omitempty"`
+	GateInlineScript   string `json:"gate_inline_script,omitempty"`
+	GateLanguage       string `json:"gate_language,omitempty"`
+	GateTimeoutSeconds int32  `json:"gate_timeout_seconds,omitempty"`
+	GateOnFail         string `json:"gate_on_fail,omitempty"`
 }
 
 // EffectiveRole defaults an unset role to executor (design.md §4.3).
@@ -115,6 +153,35 @@ func (c NodeConfig) EffectiveFailPolicy() string {
 		return FailPolicyRework
 	}
 	return c.FailPolicy
+}
+
+// EffectiveGateLanguage applies the gate default language. Empty/unset →
+// "shell" (PRD R4). Any explicit value is returned as-is (the enum was
+// validated at ParseNodeConfig time).
+func (c NodeConfig) EffectiveGateLanguage() string {
+	if c.GateLanguage == "" {
+		return GateLanguageShell
+	}
+	return c.GateLanguage
+}
+
+// EffectiveGateTimeoutSeconds applies the gate default timeout. Zero/unset
+// → 60s. The value is clamped to [1, 300] at publish time (validateGateConfig),
+// so by the time this runs the result is always in range.
+func (c NodeConfig) EffectiveGateTimeoutSeconds() int32 {
+	if c.GateTimeoutSeconds <= 0 {
+		return gateDefaultTimeoutSec
+	}
+	return c.GateTimeoutSeconds
+}
+
+// EffectiveGateOnFail applies the gate default on_fail policy. Empty/unset
+// → "block" (PRD R4 / R6 contract #4 — gate verdict is blocking by default).
+func (c NodeConfig) EffectiveGateOnFail() string {
+	if c.GateOnFail == "" {
+		return GateOnFailBlock
+	}
+	return c.GateOnFail
 }
 
 // ParseNodeConfig decodes a node config blob, tolerating unknown fields
@@ -148,6 +215,15 @@ func ParseNodeConfig(raw []byte) (NodeConfig, error) {
 	case "", FailPolicyFail, FailPolicyBlocked, FailPolicyRework:
 	default:
 		return NodeConfig{}, fmt.Errorf("node config: unknown fail_policy %q", cfg.FailPolicy)
+	}
+	// P1-3 gate_on_fail enum. Empty is legal (defaults to block via
+	// EffectiveGateOnFail); the other fields are checked by
+	// validateGateConfig at publish time, which has the cross-node context
+	// (node type) needed to scope them.
+	switch cfg.GateOnFail {
+	case "", GateOnFailBlock, GateOnFailWarn:
+	default:
+		return NodeConfig{}, fmt.Errorf("node config: unknown gate_on_fail %q", cfg.GateOnFail)
 	}
 	return cfg, nil
 }
@@ -523,7 +599,7 @@ func validateTemplateGraph(nodes []NodeInput, edges []EdgeInput) error {
 		}
 		keys[n.NodeKey] = true
 		switch n.Type {
-		case NodeTypeAgent, NodeTypeAcceptance, NodeTypeEnd, NodeTypeFanOut, NodeTypeConverge:
+		case NodeTypeAgent, NodeTypeAcceptance, NodeTypeEnd, NodeTypeFanOut, NodeTypeConverge, NodeTypeGate:
 		default:
 			return fmt.Errorf("workflow: node %q has unsupported type %q", n.NodeKey, n.Type)
 		}
@@ -585,6 +661,13 @@ func validateTemplateGraph(nodes []NodeInput, edges []EdgeInput) error {
 		if err := ValidateFanOutConfig(n, cfgByKey[n.NodeKey], nodes, edges); err != nil {
 			return err
 		}
+	}
+	// P1-3: gate node config (gate_type + script source + on_fail + caps).
+	// Same placement rationale as fan_out: after the structural graph
+	// check so a structurally malformed gate surfaces the graph error
+	// before its config error.
+	if err := validateGateConfig(nodes, cfgByKey); err != nil {
+		return err
 	}
 	// Exactly one start node (in-degree 0). Zero starts means the graph is
 	// one big cycle (every node has at least one inbound edge).
@@ -694,6 +777,69 @@ func validateEdgeConditions(nodes []NodeInput, edges []EdgeInput) error {
 				"workflow: agent node %q has %d catch-all (condition=nil) edges; at most one is allowed to keep routing deterministic",
 				fromKey, n)
 		}
+	}
+	return nil
+}
+
+// validateGateConfig enforces the P1-3 gate-node publish rules (PRD R4 /
+// AC2). Runs inside validateTemplateGraph after the per-type shape check
+// so a structurally malformed gate surfaces its graph error first.
+//
+// Rules:
+//   - every gate node must set gate_type
+//   - gate_type must be one of {script, agent, rules, adversarial, hybrid}
+//   - gate_type=script requires exactly one of gate_script_ref /
+//     gate_inline_script (XOR — both set or both empty is rejected)
+//   - gate_inline_script ≤ 4KB (gateInlineScriptMaxBytes)
+//   - gate_on_fail ∈ {block, warn} (empty is legal; EffectiveGateOnFail
+//     defaults to block)
+//   - gate_language (if set) ∈ {shell, python3}
+//   - gate_timeout_seconds (if set) ∈ [1, 300]
+//
+// agent/rules/adversarial/hybrid gate types are accepted at publish so a
+// template carrying them does not require a follow-up migration when
+// P1-3b activates them; their type-specific config validation lands then.
+func validateGateConfig(nodes []NodeInput, cfgByKey map[string]NodeConfig) error {
+	for _, n := range nodes {
+		if n.Type != NodeTypeGate {
+			continue
+		}
+		cfg := cfgByKey[n.NodeKey]
+		switch cfg.GateType {
+		case "":
+			return fmt.Errorf("workflow: gate node %q requires gate_type", n.NodeKey)
+		case GateTypeScript:
+			hasRef := cfg.GateScriptRef != ""
+			hasInline := cfg.GateInlineScript != ""
+			if hasRef == hasInline {
+				return fmt.Errorf(
+					"workflow: gate node %q must set exactly one of gate_script_ref or gate_inline_script",
+					n.NodeKey)
+			}
+			if hasInline && len(cfg.GateInlineScript) > gateInlineScriptMaxBytes {
+				return fmt.Errorf(
+					"workflow: gate node %q gate_inline_script is %d bytes, max %d",
+					n.NodeKey, len(cfg.GateInlineScript), gateInlineScriptMaxBytes)
+			}
+		case GateTypeAgent, GateTypeRules, GateTypeAdversarial, GateTypeHybrid:
+			// P1-3b scope. Accepted at publish; config validation for
+			// these forms lands with their activation.
+		default:
+			return fmt.Errorf("workflow: gate node %q has unknown gate_type %q", n.NodeKey, cfg.GateType)
+		}
+		switch cfg.GateLanguage {
+		case "", GateLanguageShell, GateLanguagePython3:
+		default:
+			return fmt.Errorf("workflow: gate node %q has unknown gate_language %q", n.NodeKey, cfg.GateLanguage)
+		}
+		if cfg.GateTimeoutSeconds != 0 {
+			if cfg.GateTimeoutSeconds < gateTimeoutMinSeconds || cfg.GateTimeoutSeconds > gateTimeoutMaxSeconds {
+				return fmt.Errorf(
+					"workflow: gate node %q gate_timeout_seconds=%d out of range [%d, %d]",
+					n.NodeKey, cfg.GateTimeoutSeconds, gateTimeoutMinSeconds, gateTimeoutMaxSeconds)
+			}
+		}
+		// gate_on_fail enum already enforced by ParseNodeConfig.
 	}
 	return nil
 }

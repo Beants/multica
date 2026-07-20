@@ -475,6 +475,19 @@ type Feedback struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type GateRun struct {
+	ID             pgtype.UUID        `json:"id"`
+	StepInstanceID pgtype.UUID        `json:"step_instance_id"`
+	ScriptID       pgtype.UUID        `json:"script_id"`
+	GateType       string             `json:"gate_type"`
+	Status         string             `json:"status"`
+	Output         []byte             `json:"output"`
+	DurationMs     int32              `json:"duration_ms"`
+	StartedAt      pgtype.Timestamptz `json:"started_at"`
+	FinishedAt     pgtype.Timestamptz `json:"finished_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type GithubInstallation struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
@@ -1103,6 +1116,19 @@ type WorkflowEdge struct {
 	Condition  []byte             `json:"condition"`
 	Priority   int32              `json:"priority"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkflowGateScript struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	Name              string             `json:"name"`
+	Language          string             `json:"language"`
+	ScriptText        string             `json:"script_text"`
+	Checksum          string             `json:"checksum"`
+	MaxTimeoutSeconds int32              `json:"max_timeout_seconds"`
+	MaxOutputBytes    int32              `json:"max_output_bytes"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type WorkflowHook struct {
