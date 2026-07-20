@@ -26,3 +26,13 @@ RETURNING *;
 SELECT * FROM gate_run
 WHERE step_instance_id = $1
 ORDER BY created_at DESC;
+
+-- name: GetRunningGateRunByStep :one
+-- P1-3b: lookup of the still-running gate_run bound to a step (agent /
+-- adversarial gate form). Returns pgx.ErrNoRows when no gate_run exists
+-- for the step or it has already been finalized — the common non-gate
+-- step case is a zero-row lookup, kept cheap.
+SELECT * FROM gate_run
+WHERE step_instance_id = $1 AND status = 'running'
+ORDER BY created_at DESC
+LIMIT 1;

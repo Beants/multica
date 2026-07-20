@@ -66,6 +66,35 @@ func (q *Queries) GetGateRun(ctx context.Context, id pgtype.UUID) (GateRun, erro
 	return i, err
 }
 
+const getRunningGateRunByStep = `-- name: GetRunningGateRunByStep :one
+SELECT id, step_instance_id, script_id, gate_type, status, output, duration_ms, started_at, finished_at, created_at FROM gate_run
+WHERE step_instance_id = $1 AND status = 'running'
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+// P1-3b: lookup of the still-running gate_run bound to a step (agent /
+// adversarial gate form). Returns pgx.ErrNoRows when no gate_run exists
+// for the step or it has already been finalized — the common non-gate
+// step case is a zero-row lookup, kept cheap.
+func (q *Queries) GetRunningGateRunByStep(ctx context.Context, stepInstanceID pgtype.UUID) (GateRun, error) {
+	row := q.db.QueryRow(ctx, getRunningGateRunByStep, stepInstanceID)
+	var i GateRun
+	err := row.Scan(
+		&i.ID,
+		&i.StepInstanceID,
+		&i.ScriptID,
+		&i.GateType,
+		&i.Status,
+		&i.Output,
+		&i.DurationMs,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listGateRunsByStep = `-- name: ListGateRunsByStep :many
 SELECT id, step_instance_id, script_id, gate_type, status, output, duration_ms, started_at, finished_at, created_at FROM gate_run
 WHERE step_instance_id = $1

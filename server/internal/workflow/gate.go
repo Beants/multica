@@ -84,16 +84,83 @@ type gateExecResult struct {
 	truncated bool
 }
 
-// activateGateNode dispatches a gate node by gate_type. The MVP supports
-// only gate_type=script; the other four forms return
-// ErrGateTypeNotImplemented so the failure is visible (P1-3b activates
-// them).
+// isAgentGateForm reports whether the snapshot node is a gate that
+// dispatches via activateGateAgentNode (P1-3b: gate_type=agent or
+// adversarial). Used by consumeVerdictTx to route verdict=fail through
+// the gate's on_fail policy instead of the P0 evaluator retry path,
+// and by RecordVerdict's effective-role check via the publish-time
+// role freeze.
+func isAgentGateForm(node *SnapshotNode) bool {
+	if node == nil || node.Type != NodeTypeGate {
+		return false
+	}
+	return node.Config.GateType == GateTypeAgent || node.Config.GateType == GateTypeAdversarial
+}
+
+// activateGateNode dispatches a gate node by gate_type.
+//   - script:      inline / registered shell or python3 script (P1-3 MVP)
+//   - agent:       evaluator-role agent dispatch (P1-3b)
+//   - adversarial: evaluator-role agent dispatch with context whitelist
+//     (P1-3b; harness/squad-briefing.md:158)
+//
+// rules / hybrid return ErrGateTypeNotImplemented so the failure is
+// visible (P1-3c / P1-4 activates them).
 func (e *Engine) activateGateNode(ctx context.Context, run db.WorkflowRun, snap *Snapshot, node *SnapshotNode, step db.StepInstance) error {
-	if node.Config.GateType != GateTypeScript {
+	switch node.Config.GateType {
+	case GateTypeScript:
+		return e.runScriptGate(ctx, run, snap, node, step)
+	case GateTypeAgent, GateTypeAdversarial:
+		return e.activateGateAgentNode(ctx, run, snap, node, step, node.Config.GateType == GateTypeAdversarial)
+	default:
 		return e.failActivation(ctx, run, step, fmt.Errorf(
 			"gate node %q: %w", node.NodeKey, ErrGateTypeNotImplemented))
 	}
-	return e.runScriptGate(ctx, run, snap, node, step)
+}
+
+// activateGateAgentNode dispatches a gate node whose gate_type is agent or
+// adversarial (P1-3b). It reuses the P0 evaluator-role agent activation
+// pipeline (activateAgentNode) with three gate-specific tweaks:
+//
+//  1. txA inserts a gate_run row in 'running' state first, so the audit
+//     trail records the gate dispatch even if the agent never produces a
+//     verdict. The gate_run is finalized in consumeVerdictTx when the
+//     step reaches a terminal state (agent verdict / max-attempt fail).
+//  2. The node config is copied with role=evaluator forced — gate
+//     agents are reviewers by contract, never executors.
+//  3. adversarial=true (gate_type=adversarial) signals buildHandoffNote
+//     to apply the context whitelist (no instructions / upstream
+//     exit_fields / rework) so the reviewer must derive its verdict from
+//     the diff/test cases the daemon exposes via the workdir
+//     (squad-briefing.md:158).
+//
+// gate_run.gate_type carries the ORIGINAL gate_type (agent / adversarial)
+// — not the synthesized role — so the audit trail reflects the template's
+// intent, not the dispatch plumbing.
+func (e *Engine) activateGateAgentNode(ctx context.Context, run db.WorkflowRun, snap *Snapshot, node *SnapshotNode, step db.StepInstance, adversarial bool) error {
+	// ============ txA: INSERT gate_run(running) + COMMIT ============
+	tx, err := e.TxStarter.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("gate agent txA begin: %w", err)
+	}
+	qtx := e.Queries.WithTx(tx)
+	if _, err := qtx.CreateGateRun(ctx, db.CreateGateRunParams{
+		StepInstanceID: step.ID,
+		GateType:       node.Config.GateType,
+	}); err != nil {
+		_ = tx.Rollback(ctx)
+		return e.failActivation(ctx, run, step, fmt.Errorf("create gate_run: %w", err))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("gate agent txA commit: %w", err)
+	}
+
+	// Force role=evaluator on a config copy. The original snapshot node
+	// is shared (read-only across steps); a shallow struct copy plus
+	// config overwrite keeps it intact. AgentID was already resolved at
+	// publish time, so activateAgentNode's UUID parse succeeds.
+	nodeCopy := *node
+	nodeCopy.Config.Role = RoleEvaluator
+	return e.activateAgentNode(ctx, run, snap, &nodeCopy, step, nil, adversarial)
 }
 
 // runScriptGate implements the PRD R5 double-transaction flow:
@@ -457,7 +524,7 @@ func allowlistEnv() []string {
 // script's structured verdict (design.md §2.3). Returns ok=false when:
 //   - stdout is empty
 //   - the last non-empty line is not valid JSON
-//   - the JSON parses but the status field is outside {pass,block,warn}
+//   - the JSON parses but the status field is outside {pass, block, warn}
 //
 // Non-JSON output is a script bug; the caller maps it to status=error →
 // VerdictBlocked so the run pauses rather than silently advancing.
@@ -538,4 +605,54 @@ func deriveGateStatusAndVerdict(res gateExecResult, runErr error, onFail string)
 	}
 	// parseGateOutput already rejected non-enum status; this is unreachable.
 	return "error", gro, StepBlocked
+}
+
+// deriveGateRunStatusFromVerdict maps an evaluator agent's verdict to the
+// (gate_run.status, gate_run.output) payload, mirroring the script gate's
+// deriveGateStatusAndVerdict matrix for the verdict-driven path (P1-3b).
+// The agent gate form has no script output / fix_hint; the gate_run.output
+// JSONB carries the verdict identity + the agent's evidence / root_cause so
+// the audit trail retains the reviewer's reasoning even when the run
+// advances under on_fail=warn.
+//
+//	verdict=pass                          → ("pass",  evidence)
+//	verdict=fail + on_fail=warn           → ("warn",  evidence)
+//	verdict=fail + on_fail=block (default) → ("block", evidence)
+//	verdict=blocked                       → ("block", evidence)
+//
+// DurationMs is left at 0 (the agent run-time accounting lands in P1-6's
+// acceptance view aggregation; consumeVerdictTx does not have a clean
+// signal for how long the agent actually spent on the task).
+func deriveGateRunStatusFromVerdict(verdict db.Verdict, onFail string) (string, map[string]any) {
+	output := map[string]any{
+		"verdict_id": util.UUIDToString(verdict.ID),
+		"verdict_by": verdict.VerdictBy,
+	}
+	if verdict.RootCause.Valid {
+		output["root_cause"] = verdict.RootCause.String
+	}
+	if len(verdict.Evidence) > 0 {
+		var ev map[string]any
+		if err := json.Unmarshal(verdict.Evidence, &ev); err == nil {
+			output["evidence"] = ev
+		} else {
+			// Preserve the raw bytes as a string so a malformed
+			// evidence blob still surfaces in the audit trail.
+			output["evidence_raw"] = string(verdict.Evidence)
+		}
+	}
+	switch verdict.Result {
+	case VerdictPass:
+		return "pass", output
+	case VerdictFail:
+		if onFail == GateOnFailWarn {
+			return "warn", output
+		}
+		return "block", output
+	case VerdictBlocked:
+		return "block", output
+	}
+	// Unknown verdict results are rejected upstream by consumeVerdictTx's
+	// switch default; this branch is unreachable.
+	return "block", output
 }

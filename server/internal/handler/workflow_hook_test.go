@@ -66,11 +66,18 @@ func setupHookFixture(t *testing.T, key string, nodes []workflow.NodeInput, edge
 		if err != nil {
 			t.Fatalf("parse node config: %v", err)
 		}
-		switch cfg.Role {
-		case workflow.RoleExecutor, "":
-			cfg.AgentSelector = fmt.Sprintf("WF Hook Executor %d", suffix)
-		case workflow.RoleEvaluator:
-			cfg.AgentSelector = fmt.Sprintf("WF Hook Evaluator %d", suffix)
+		// P1-3b: NodeTypeGate + gate_type=agent/adversarial binds to the
+		// evaluator agent (activateGateAgentNode forces role=evaluator).
+		isAgentGate := nodes[i].Type == workflow.NodeTypeGate &&
+			(cfg.GateType == workflow.GateTypeAgent || cfg.GateType == workflow.GateTypeAdversarial)
+		bindEvaluator := cfg.Role == workflow.RoleEvaluator || isAgentGate
+		switch {
+		case isAgentGate || nodes[i].Type == workflow.NodeTypeAgent:
+			if bindEvaluator {
+				cfg.AgentSelector = fmt.Sprintf("WF Hook Evaluator %d", suffix)
+			} else {
+				cfg.AgentSelector = fmt.Sprintf("WF Hook Executor %d", suffix)
+			}
 		}
 		raw, _ := json.Marshal(cfg)
 		nodes[i].Config = raw

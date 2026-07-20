@@ -175,10 +175,16 @@ func (c NodeConfig) EffectiveGateTimeoutSeconds() int32 {
 	return c.GateTimeoutSeconds
 }
 
-// EffectiveGateOnFail applies the gate default on_fail policy. Empty/unset
-// → "block" (PRD R4 / R6 contract #4 — gate verdict is blocking by default).
+// EffectiveGateOnFail applies the gate default on_fail policy.
+// Empty/unset → "block" for script/agent/rules/hybrid (PRD R4 / R6
+// contract #4 — gate verdict is blocking by default); "warn" for
+// adversarial (P1-3b: harness practice — adversarial review output is
+// advisory, never blocks, harness/squad-briefing.md:158).
 func (c NodeConfig) EffectiveGateOnFail() string {
 	if c.GateOnFail == "" {
+		if c.GateType == GateTypeAdversarial {
+			return GateOnFailWarn
+		}
 		return GateOnFailBlock
 	}
 	return c.GateOnFail
@@ -821,9 +827,20 @@ func validateGateConfig(nodes []NodeInput, cfgByKey map[string]NodeConfig) error
 					"workflow: gate node %q gate_inline_script is %d bytes, max %d",
 					n.NodeKey, len(cfg.GateInlineScript), gateInlineScriptMaxBytes)
 			}
-		case GateTypeAgent, GateTypeRules, GateTypeAdversarial, GateTypeHybrid:
-			// P1-3b scope. Accepted at publish; config validation for
-			// these forms lands with their activation.
+		case GateTypeAgent, GateTypeAdversarial:
+			// P1-3b: agent/adversarial forms reuse the P0 evaluator-role
+			// agent pipeline. agent_selector is required and resolved to
+			// agent_id at publish time (see PublishTemplate). The
+			// produce/review separation rule is enforced by the shared
+			// EvaluatorSeparation loop in PublishTemplate.
+			if cfg.AgentSelector == "" && cfg.AgentID == "" {
+				return fmt.Errorf(
+					"workflow: gate node %q gate_type=%s requires agent_selector",
+					n.NodeKey, cfg.GateType)
+			}
+		case GateTypeRules, GateTypeHybrid:
+			// P1-3c / P1-4 scope. Accepted at publish; config validation
+			// for these forms lands with their activation.
 		default:
 			return fmt.Errorf("workflow: gate node %q has unknown gate_type %q", n.NodeKey, cfg.GateType)
 		}
@@ -1175,7 +1192,13 @@ func (s *TemplateService) PublishTemplate(ctx context.Context, workspaceID, temp
 
 	for i := range detail.Nodes {
 		n := &detail.Nodes[i]
-		if n.Type != NodeTypeAgent {
+		// P1-3b: NodeTypeGate with gate_type=agent/adversarial is
+		// resolved the same way as NodeTypeAgent — selector → agent_id.
+		// Other gate types (script/rules/hybrid) carry no selector.
+		isAgentGate := n.Type == NodeTypeGate &&
+			(configByKey[n.NodeKey].GateType == GateTypeAgent ||
+				configByKey[n.NodeKey].GateType == GateTypeAdversarial)
+		if n.Type != NodeTypeAgent && !isAgentGate {
 			continue
 		}
 		cfg := configByKey[n.NodeKey]
@@ -1188,6 +1211,14 @@ func (s *TemplateService) PublishTemplate(ctx context.Context, workspaceID, temp
 			return nil, fmt.Errorf("node %q: %w", n.NodeKey, err)
 		}
 		cfg.AgentID = util.UUIDToString(agent.ID)
+		// P1-3b: gate_type=agent/adversarial forces role=evaluator at
+		// publish time so the frozen snapshot reflects the gate's
+		// reviewer semantics. RecordVerdict reads role from the
+		// snapshot, not the in-memory dispatch copy, so without this
+		// freeze every agent-gate verdict would hit ErrNotEvaluatorStep.
+		if isAgentGate {
+			cfg.Role = RoleEvaluator
+		}
 		configByKey[n.NodeKey] = cfg
 		frozen, err := json.Marshal(cfg)
 		if err != nil {
@@ -1201,10 +1232,15 @@ func (s *TemplateService) PublishTemplate(ctx context.Context, workspaceID, temp
 		}
 	}
 
-	// Produce/review separation: an evaluator must not be the same agent as
-	// any upstream executor (blueprint pillar 5, design.md §4.3).
+	// Produce/review separation (blueprint pillar 5, design.md §4.3).
+	// Covers both NodeTypeAgent with role=evaluator (P0) and NodeTypeGate
+	// with gate_type in {agent, adversarial} (P1-3b: a gate agent IS the
+	// reviewer, so it must not share an agent with an upstream executor).
 	for _, n := range snap.Nodes {
-		if n.Type != NodeTypeAgent || n.Config.EffectiveRole() != RoleEvaluator {
+		isEvaluatorAgent := n.Type == NodeTypeAgent && n.Config.EffectiveRole() == RoleEvaluator
+		isAgentGate := n.Type == NodeTypeGate &&
+			(n.Config.GateType == GateTypeAgent || n.Config.GateType == GateTypeAdversarial)
+		if !isEvaluatorAgent && !isAgentGate {
 			continue
 		}
 		evaluatorAgent := configByKey[n.NodeKey].AgentID
