@@ -508,14 +508,17 @@ func TestAC6ScriptGateBlockOnFailWarn(t *testing.T) {
 
 // TestAC7ScriptGateTimeout pins the timeout path (PRD AC7): an inline
 // script that exceeds gate_timeout_seconds surfaces as gate_run.status=
-// error, step → blocked, run → paused. The 1s timeout + 10s sleep keeps
-// the test fast while still exercising context.Cancel + the stderr
-// "timeout after Xs" override in executeScript.
+// error, step → blocked, run → paused. The 3s timeout + 6s sleep keeps
+// the test fast while exercising context.Cancel + the stderr "timeout
+// after Xs" override in executeScript. The 3s margin (was 1s) absorbs CI
+// runner jitter: at 1s the gate_run had often not flipped to 'error' before
+// the post-submit assertion read it, making the test flaky on slow CI
+// machines (3 consecutive failures on PR #10).
 func TestAC7ScriptGateTimeout(t *testing.T) {
 	gateCfg := workflow.NodeConfig{
 		GateType:           workflow.GateTypeScript,
-		GateInlineScript:   `sleep 10`,
-		GateTimeoutSeconds: 1,
+		GateInlineScript:   `sleep 6`,
+		GateTimeoutSeconds: 3,
 	}
 	nodes, edges := gateE2ETemplate(t, gateCfg)
 	f := setupWorkflowAPIFixture(t, "ac7-timeout", nodes, edges)
