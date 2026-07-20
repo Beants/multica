@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_gate_run_finished;

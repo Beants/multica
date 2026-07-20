@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS uq_workflow_gate_script_workspace_name;
