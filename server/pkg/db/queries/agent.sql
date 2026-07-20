@@ -182,6 +182,15 @@ SELECT * FROM agent_task_queue
 WHERE agent_id = $1
 ORDER BY created_at DESC;
 
+-- name: ListAgentTasksForRun :many
+-- P1-6 diagnosis: every agent_task_queue row attached to a run's steps
+-- (batch load — avoids per-step N+1 in the diagnosis aggregator). The
+-- error + result columns feed the failure-reason and stderr/stdout
+-- elements of the seven-element diagnosis (军团文 §4.5).
+SELECT * FROM agent_task_queue
+WHERE id IN (SELECT agent_task_id FROM step_instance WHERE run_id = $1 AND agent_task_id IS NOT NULL)
+ORDER BY created_at DESC;
+
 -- name: CreateAgentTask :one
 -- head_sha stamps the commit under review into the task's context JSONB so the
 -- reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run

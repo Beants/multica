@@ -95,6 +95,7 @@ func registerWorkflowRoutes(r chi.Router, h *handler.Handler, authMW func(http.H
 			r.Get("/", wrh.ListRuns)
 			r.Route("/{id}", func(r chi.Router) {
 				r.Get("/", wrh.GetRun)
+				r.Get("/diagnosis", wrh.GetRunDiagnosis)
 				r.Post("/acceptance/approve", wrh.ApproveAcceptance)
 				r.Post("/acceptance/reject", wrh.RejectAcceptance)
 			})

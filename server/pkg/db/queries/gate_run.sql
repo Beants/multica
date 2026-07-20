@@ -27,6 +27,15 @@ SELECT * FROM gate_run
 WHERE step_instance_id = $1
 ORDER BY created_at DESC;
 
+-- name: ListGateRunsForRun :many
+-- P1-6 diagnosis: every gate_run row for a run's steps (batch load). The
+-- output JSONB carries {stdout, stderr, facts, dispositions} and status
+-- (pass/block/warn/error) — the stderr/stdout + gate-reject elements of
+-- the seven-element diagnosis.
+SELECT * FROM gate_run
+WHERE step_instance_id IN (SELECT id FROM step_instance WHERE run_id = $1)
+ORDER BY created_at DESC;
+
 -- name: GetRunningGateRunByStep :one
 -- P1-3b: lookup of the still-running gate_run bound to a step (agent /
 -- adversarial gate form). Returns pgx.ErrNoRows when no gate_run exists

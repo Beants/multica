@@ -132,6 +132,47 @@ func (q *Queries) ListGateRunsByStep(ctx context.Context, stepInstanceID pgtype.
 	return items, nil
 }
 
+const listGateRunsForRun = `-- name: ListGateRunsForRun :many
+SELECT id, step_instance_id, script_id, gate_type, status, output, duration_ms, started_at, finished_at, created_at FROM gate_run
+WHERE step_instance_id IN (SELECT id FROM step_instance WHERE run_id = $1)
+ORDER BY created_at DESC
+`
+
+// P1-6 diagnosis: every gate_run row for a run's steps (batch load). The
+// output JSONB carries {stdout, stderr, facts, dispositions} and status
+// (pass/block/warn/error) — the stderr/stdout + gate-reject elements of
+// the seven-element diagnosis.
+func (q *Queries) ListGateRunsForRun(ctx context.Context, runID pgtype.UUID) ([]GateRun, error) {
+	rows, err := q.db.Query(ctx, listGateRunsForRun, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GateRun{}
+	for rows.Next() {
+		var i GateRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.StepInstanceID,
+			&i.ScriptID,
+			&i.GateType,
+			&i.Status,
+			&i.Output,
+			&i.DurationMs,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateGateRunResult = `-- name: UpdateGateRunResult :one
 UPDATE gate_run
 SET status = $2,
