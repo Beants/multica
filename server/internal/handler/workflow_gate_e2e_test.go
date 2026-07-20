@@ -279,19 +279,23 @@ func TestAC2GatePublishValidation(t *testing.T) {
 // AC3: gate_type != script → publish OK, activate fails
 // ---------------------------------------------------------------------------
 
-// TestAC3GateTypeNotImplemented pins the P1-3b forward-compat contract:
-// agent/rules/adversarial/hybrid gate types PASS publish validation
-// (PRD §Resolved Decisions Q1 + Wave 2 forward-compat test), but the
-// MVP runtime refuses to dispatch them via ErrGateTypeNotImplemented
+// TestAC3GateTypeNotImplemented pins the P1-3c/P1-4 forward-compat
+// contract: rules and hybrid gate types PASS publish validation (PRD
+// §Resolved Decisions Q1 + Wave 2 forward-compat test), but the
+// runtime refuses to dispatch them via ErrGateTypeNotImplemented
 // (PRD R1 / AC3). The observable HTTP-surface behavior is the same as
 // any failActivation: gate step → blocked, run → paused, initiator
 // notified.
 //
-// publish passes for these types so a template carrying them does not
-// require a follow-up migration when P1-3b activates them; the runtime
-// refusal is fail-visible rather than silent.
+// P1-3b: agent and adversarial are now ACTIVATED (they were on this
+// list in P1-3 MVP). Their end-to-end behavior is covered by the
+// P1-3b suite (workflow_gate_agent_e2e_test.go).
+//
+// publish passes for rules/hybrid so a template carrying them does not
+// require a follow-up migration when P1-3c/P1-4 activates them; the
+// runtime refusal is fail-visible rather than silent.
 func TestAC3GateTypeNotImplemented(t *testing.T) {
-	for _, gt := range []string{workflow.GateTypeAgent, workflow.GateTypeRules, workflow.GateTypeAdversarial, workflow.GateTypeHybrid} {
+	for _, gt := range []string{workflow.GateTypeRules, workflow.GateTypeHybrid} {
 		t.Run(gt, func(t *testing.T) {
 			gateCfg := workflow.NodeConfig{GateType: gt}
 			nodes, edges := gateE2ETemplate(t, gateCfg)
@@ -321,7 +325,8 @@ func TestAC3GateTypeNotImplemented(t *testing.T) {
 			}
 			// No gate_run row should be written — the type dispatch
 			// refuses BEFORE the txA INSERT (gate.go activateGateNode
-			// checks GateType before runScriptGate).
+			// dispatches to ErrGateTypeNotImplemented before
+			// activateGateAgentNode or runScriptGate runs).
 			var gateRunCount int
 			if err := testPool.QueryRow(context.Background(), `
 				SELECT count(*) FROM gate_run gr

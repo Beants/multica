@@ -243,9 +243,26 @@ func (e *Engine) assembleReworkContext(ctx context.Context, runID pgtype.UUID, t
 // node's exit-fields schema [+ rework_context on rework rounds]. The note
 // is sanitized and capped at 4KB; every line is prefixed so it stays inside
 // prompt.go's `> ` quote frame (which only prefixes the first line itself).
-func (e *Engine) buildHandoffNote(ctx context.Context, run db.WorkflowRun, snap *Snapshot, node *SnapshotNode, step db.StepInstance, rc *ReworkContext) string {
+//
+// P1-3b adversarial gate form (squad-briefing.md:158): when adversarial is
+// true, the note is whitelisted to node identity + exit_fields schema only.
+// Instructions, upstream exit_fields, and rework context are skipped so the
+// reviewer cannot lean on the builder's framing — it must derive its
+// verdict from the diff/test cases the daemon exposes via the workdir.
+func (e *Engine) buildHandoffNote(ctx context.Context, run db.WorkflowRun, snap *Snapshot, node *SnapshotNode, step db.StepInstance, rc *ReworkContext, adversarial bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[workflow node] %s (%s) — attempt %d\n", sanitizePromptText(node.Name), node.NodeKey, step.Attempt)
+
+	if adversarial {
+		// Adversarial whitelist: identity + exit_fields schema only.
+		// The daemon's workdir already exposes the diff/test cases —
+		// those are the inputs we want the reviewer to reason from.
+		if schema := node.Config.ExitFields; schema != nil && len(schema.Fields) > 0 {
+			fmt.Fprintf(&b, "[exit_fields schema] %s\n", compactJSON(schema, 1024))
+		}
+		b.WriteString("Adversarial review: identify issues from the diff/test cases alone (no prd/design context).")
+		return finalizeHandoffNote(b.String())
+	}
 
 	instructions := sanitizePromptText(node.Config.Instructions)
 	if instructions == "" {

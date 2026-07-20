@@ -67,12 +67,12 @@ func TestValidateGateConfig_UnknownGateType(t *testing.T) {
 	}
 }
 
-// P1-3b forward-compat: agent/rules/adversarial/hybrid are accepted at
-// publish (no script_ref/inline XOR check) so a template carrying them
-// survives until P1-3b activates them.
+// P1-3b: rules/hybrid remain forward-compat (accepted at publish, config
+// validation lands with their activation in P1-3c / P1-4). agent and
+// adversarial now require agent_selector (P1-3b enforced).
 func TestValidateGateConfig_P13bFormsAcceptedAtPublish(t *testing.T) {
 	t.Parallel()
-	for _, gt := range []string{GateTypeAgent, GateTypeRules, GateTypeAdversarial, GateTypeHybrid} {
+	for _, gt := range []string{GateTypeRules, GateTypeHybrid} {
 		nodes := []NodeInput{
 			agentNode("up", RoleExecutor, "Agent", NodeConfig{}),
 			gateNode("g", NodeConfig{GateType: gt}),
@@ -82,6 +82,59 @@ func TestValidateGateConfig_P13bFormsAcceptedAtPublish(t *testing.T) {
 		if err := validateTemplateGraph(nodes, edges); err != nil {
 			t.Errorf("gate_type=%q should pass publish validation, got: %v", gt, err)
 		}
+	}
+}
+
+// P1-3b: gate_type=agent/adversarial without agent_selector is refused at
+// publish (PRD AC1).
+func TestValidateGateConfig_AgentFormsRequireSelector(t *testing.T) {
+	t.Parallel()
+	for _, gt := range []string{GateTypeAgent, GateTypeAdversarial} {
+		nodes := []NodeInput{
+			agentNode("up", RoleExecutor, "Agent", NodeConfig{}),
+			gateNode("g", NodeConfig{GateType: gt}),
+			typedNode("end", NodeTypeEnd, NodeConfig{}),
+		}
+		edges := gateChainEdges("up", "g", "end")
+		err := validateTemplateGraph(nodes, edges)
+		if err == nil || !strings.Contains(err.Error(), "requires agent_selector") {
+			t.Errorf("gate_type=%q without agent_selector: want 'requires agent_selector', got %v", gt, err)
+		}
+	}
+}
+
+// P1-3b: gate_type=agent/adversarial WITH agent_selector passes publish.
+func TestValidateGateConfig_AgentFormsWithSelector(t *testing.T) {
+	t.Parallel()
+	for _, gt := range []string{GateTypeAgent, GateTypeAdversarial} {
+		nodes := []NodeInput{
+			agentNode("up", RoleExecutor, "Agent", NodeConfig{}),
+			gateNode("g", NodeConfig{GateType: gt, AgentSelector: "judge"}),
+			typedNode("end", NodeTypeEnd, NodeConfig{}),
+		}
+		edges := gateChainEdges("up", "g", "end")
+		if err := validateTemplateGraph(nodes, edges); err != nil {
+			t.Errorf("gate_type=%q with agent_selector should pass publish, got: %v", gt, err)
+		}
+	}
+}
+
+// P1-3b: EffectiveGateOnFail defaults to warn for adversarial form
+// (squad-briefing.md:158 advisory practice); other forms default to block.
+func TestNodeConfigEffectiveGateOnFailAdversarial(t *testing.T) {
+	t.Parallel()
+	if got := (NodeConfig{GateType: GateTypeAdversarial}).EffectiveGateOnFail(); got != GateOnFailWarn {
+		t.Errorf("adversarial empty on_fail = %q, want warn", got)
+	}
+	if got := (NodeConfig{GateType: GateTypeAgent}).EffectiveGateOnFail(); got != GateOnFailBlock {
+		t.Errorf("agent empty on_fail = %q, want block", got)
+	}
+	if got := (NodeConfig{GateType: GateTypeScript}).EffectiveGateOnFail(); got != GateOnFailBlock {
+		t.Errorf("script empty on_fail = %q, want block", got)
+	}
+	// Explicit on_fail always wins.
+	if got := (NodeConfig{GateType: GateTypeAdversarial, GateOnFail: GateOnFailBlock}).EffectiveGateOnFail(); got != GateOnFailBlock {
+		t.Errorf("adversarial explicit block = %q, want block (explicit wins)", got)
 	}
 }
 

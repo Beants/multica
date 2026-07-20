@@ -79,16 +79,25 @@ func setupWorkflowAPIFixture(t *testing.T, key string, nodes []workflow.NodeInpu
 	f.evaluatorID = mkAgent("Evaluator")
 
 	// Bind node selectors to the fresh agent names.
+	// P1-3b: NodeTypeGate with gate_type in {agent, adversarial} is
+	// implicitly evaluator (activateGateAgentNode forces the role), so
+	// it binds to the evaluator agent — same as NodeTypeAgent with
+	// role=evaluator.
 	for i := range nodes {
 		cfg, err := workflow.ParseNodeConfig(nodes[i].Config)
 		if err != nil {
 			t.Fatalf("parse node config: %v", err)
 		}
-		switch cfg.Role {
-		case workflow.RoleExecutor, "":
-			cfg.AgentSelector = fmt.Sprintf("WF Executor %d", suffix)
-		case workflow.RoleEvaluator:
-			cfg.AgentSelector = fmt.Sprintf("WF Evaluator %d", suffix)
+		isAgentGate := nodes[i].Type == workflow.NodeTypeGate &&
+			(cfg.GateType == workflow.GateTypeAgent || cfg.GateType == workflow.GateTypeAdversarial)
+		bindEvaluator := cfg.Role == workflow.RoleEvaluator || isAgentGate
+		switch {
+		case isAgentGate || nodes[i].Type == workflow.NodeTypeAgent:
+			if bindEvaluator {
+				cfg.AgentSelector = fmt.Sprintf("WF Evaluator %d", suffix)
+			} else {
+				cfg.AgentSelector = fmt.Sprintf("WF Executor %d", suffix)
+			}
 		}
 		raw, _ := json.Marshal(cfg)
 		nodes[i].Config = raw

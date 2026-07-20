@@ -43,7 +43,7 @@ import (
 func (e *Engine) activateNode(ctx context.Context, run db.WorkflowRun, snap *Snapshot, node *SnapshotNode, step db.StepInstance, reworkCtx *ReworkContext) error {
 	switch node.Type {
 	case NodeTypeAgent:
-		return e.activateAgentNode(ctx, run, snap, node, step, reworkCtx)
+		return e.activateAgentNode(ctx, run, snap, node, step, reworkCtx, false)
 	case NodeTypeAcceptance:
 		return e.activateAcceptanceNode(ctx, run, node, step)
 	case NodeTypeEnd:
@@ -91,7 +91,11 @@ func (e *Engine) activateEndNode(ctx context.Context, run db.WorkflowRun, step d
 //  3. link dispatch artifacts onto the step,
 //  4. flip the child issue to todo through the SERVICE layer so the
 //     event/activity/WS side effects fire (R3 review #9 — never raw sqlc).
-func (e *Engine) activateAgentNode(ctx context.Context, run db.WorkflowRun, snap *Snapshot, node *SnapshotNode, step db.StepInstance, reworkCtx *ReworkContext) error {
+//
+// P1-3b: adversarial is true only when called from activateGateAgentNode
+// with gate_type=adversarial. It signals buildHandoffNote to apply the
+// adversarial context whitelist (squad-briefing.md:158).
+func (e *Engine) activateAgentNode(ctx context.Context, run db.WorkflowRun, snap *Snapshot, node *SnapshotNode, step db.StepInstance, reworkCtx *ReworkContext, adversarial bool) error {
 	agentID, err := util.ParseUUID(node.Config.AgentID)
 	if err != nil {
 		return e.failActivation(ctx, run, step, fmt.Errorf("node %q has no frozen agent_id (republish the template)", node.NodeKey))
@@ -108,7 +112,7 @@ func (e *Engine) activateAgentNode(ctx context.Context, run db.WorkflowRun, snap
 	// title guard (design.md §4.1).
 	title := fmt.Sprintf("%d-%s-attempt%d", intakeNumber, node.NodeKey, step.Attempt)
 
-	note := e.buildHandoffNote(ctx, run, snap, node, step, reworkCtx)
+	note := e.buildHandoffNote(ctx, run, snap, node, step, reworkCtx, adversarial)
 
 	// initiator stays raw for attribution (invalid => owner_fallback /
 	// fail-closed per MUL-4302); creator is coerced to the zero-UUID

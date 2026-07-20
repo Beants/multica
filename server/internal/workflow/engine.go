@@ -522,6 +522,52 @@ func (e *Engine) consumeVerdictTx(ctx context.Context, stepInstanceID pgtype.UUI
 		}
 
 	case VerdictFail:
+		// P1-3b: agent/adversarial gate consumes its fail verdict via
+		// the gate's on_fail policy rather than the P0 evaluator retry
+		// path. The agent IS the gate; its fail verdict is the gate's
+		// block status, and EffectiveGateOnFail decides whether the run
+		// advances (warn) or pauses (block). Retrying the gate agent
+		// would not change the underlying diff the agent reviewed, so
+		// retry/escalate semantics do not apply.
+		if isAgentGateForm(node) {
+			if node.Config.EffectiveGateOnFail() == GateOnFailWarn {
+				// fail + on_fail=warn → StepPassed + advance. The
+				// verdict's evidence is retained in gate_run.output by
+				// the post-switch sync hook (advisory non-blocking).
+				if !e.transitionStepTx(ctx, qtx, step, StepPassed, "verdict", verdictPayload(verdict)) {
+					return none, nil
+				}
+				if next := snap.NextAfterAll(step.NodeKey, nil); len(next) > 0 {
+					for _, nxt := range next {
+						nextStep, err := activateStepTx(ctx, qtx, run.ID, nxt.NodeKey)
+						if err != nil {
+							return none, err
+						}
+						for _, after := range lookaheadTargets(snap, &nxt) {
+							if err := preCreateStepTx(ctx, qtx, run.ID, after.NodeKey); err != nil {
+								return none, err
+							}
+						}
+						n := nxt
+						action.nextNodes = append(action.nextNodes, &n)
+						action.nextSteps = append(action.nextSteps, nextStep)
+					}
+					action.kind = "advance"
+				} else {
+					action.kind = "complete"
+				}
+				break // skip P1-2 / P0 paths; tx.Commit + gate_run hook run after the switch
+			}
+			// fail + on_fail=block → StepBlocked + pause (no retry).
+			if !e.transitionStepTx(ctx, qtx, step, StepBlocked, "verdict", verdictPayload(verdict)) {
+				return none, nil
+			}
+			if !e.pauseRunTx(ctx, qtx, run) {
+				return none, nil
+			}
+			action.kind = "blocked"
+			break
+		}
 		// P1-2 AC5 fail case: when a primary (non-fan-out-child) agent
 		// has an explicit conditional outgoing edge that matches the
 		// fail verdict (e.g. `verdict.result=="fail" → rework_loop`),
@@ -625,6 +671,32 @@ func (e *Engine) consumeVerdictTx(ctx context.Context, stepInstanceID pgtype.UUI
 
 	default:
 		return none, fmt.Errorf("workflow: unknown verdict result %q", verdict.Result)
+	}
+
+	// P1-3b: gate_run sync hook. When a step bound to a still-running
+	// gate_run reaches a terminal state, finalize the gate_run with the
+	// derived status + the agent's verdict evidence. The lookup is the
+	// cheap no-op path for non-gate steps (the common case returns
+	// pgx.ErrNoRows). Runs inside the consumeVerdictTx switch (not inside
+	// each case) so every terminal transition — pass / fail / retry /
+	// escalate / blocked — funnels through one place; the verdict result
+	// plus EffectiveGateOnFail drive the mapping.
+	if gr, gerr := qtx.GetRunningGateRunByStep(ctx, step.ID); gerr == nil {
+		reloaded, serr := qtx.GetStepInstanceForUpdate(ctx, step.ID)
+		if serr != nil {
+			return none, fmt.Errorf("reload step for gate_run hook: %w", serr)
+		}
+		if isTerminalStepStatus(reloaded.Status) {
+			status, output := deriveGateRunStatusFromVerdict(verdict, node.Config.EffectiveGateOnFail())
+			outJSON, _ := json.Marshal(output)
+			if _, eerr := qtx.UpdateGateRunResult(ctx, db.UpdateGateRunResultParams{
+				ID: gr.ID, Status: status, Output: outJSON,
+			}); eerr != nil && !errors.Is(eerr, pgx.ErrNoRows) {
+				return none, fmt.Errorf("finalize gate_run on verdict: %w", eerr)
+			}
+		}
+	} else if !errors.Is(gerr, pgx.ErrNoRows) {
+		return none, fmt.Errorf("gate_run lookup: %w", gerr)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
