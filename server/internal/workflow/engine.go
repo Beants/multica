@@ -326,7 +326,14 @@ func (e *Engine) StartRun(ctx context.Context, p StartRunParams) (db.WorkflowRun
 	if err != nil {
 		return db.WorkflowRun{}, false, fmt.Errorf("activate start node: %w", err)
 	}
-	if next := snap.NextAfterAll(startNode.NodeKey); len(next) > 0 {
+	// P1-2: StartRun uses an empty-map evalCtx (not nil) so that any
+	// hypothetical condition on a startNode downstream resolves var
+	// references to nil → falls through to catch-all. nil would mean
+	// "topology mode: every edge hits", which is also fine in practice
+	// (startNode downstreams are catch-all per the seed shapes), but
+	// empty-map is the semantically honest choice for runtime invocation.
+	startEvalCtx := buildEvalCtx(nil, nil, runCtx)
+	if next := snap.NextAfterAll(startNode.NodeKey, startEvalCtx); len(next) > 0 {
 		for _, n := range next {
 			if err := preCreateStepTx(ctx, qtx, run.ID, n.NodeKey); err != nil {
 				return db.WorkflowRun{}, false, fmt.Errorf("pre-create next node: %w", err)
@@ -448,21 +455,30 @@ func (e *Engine) consumeVerdictTx(ctx context.Context, stepInstanceID pgtype.UUI
 				return none, fmt.Errorf("copy exit fields: %w", err)
 			}
 		}
-		if !e.transitionStepTx(ctx, qtx, step, StepPassed, "verdict", verdictPayload(verdict)) {
-			return none, nil // lost the guard race; another consumer advanced
-		}
-		// Wave 2: fan_out child step reached a verdict outcome. The
-		// converge hook runs inside this tx and decides whether to
-		// fire the post-converge chain or apply a fail policy. When it
-		// fires, kind is demoted to "none" (converge owns downstream)
-		// and the effect carries the post-commit work.
+		// P1-2 AC7: distinguish "chain tail" (out-degree 0 → complete)
+		// from "no condition matched + no catch-all" (out-degree >0 →
+		// step blocked + run paused + initiator inboxed, fail-visible).
+		// The step's terminal status depends on the chosen route, so we
+		// dispatch first and let each branch pick StepPassed vs
+		// StepBlocked for its own guarded transition.
 		if step.ParentStepID.Valid {
+			if !e.transitionStepTx(ctx, qtx, step, StepPassed, "verdict", verdictPayload(verdict)) {
+				return none, nil
+			}
+			// Wave 2: fan_out child step reached a verdict outcome. The
+			// converge hook runs inside this tx and decides whether to
+			// fire the post-converge chain or apply a fail policy. When it
+			// fires, kind is demoted to "none" (converge owns downstream)
+			// and the effect carries the post-commit work.
 			effect, err := e.handleChildStepTerminal(ctx, qtx, run, step, StepPassed)
 			if err != nil {
 				return none, err
 			}
 			action.converge = effect
-		} else if next := snap.NextAfterAll(step.NodeKey); len(next) > 0 {
+		} else if next := snap.NextAfterAll(step.NodeKey, buildEvalCtx(&verdict, &submission, ParseRunContext(run.Context))); len(next) > 0 {
+			if !e.transitionStepTx(ctx, qtx, step, StepPassed, "verdict", verdictPayload(verdict)) {
+				return none, nil // lost the guard race; another consumer advanced
+			}
 			// Wave 0 P0 invariant: agent/acceptance nodes have out-degree
 			// 1, so this loop runs once for linear templates. fan_out
 			// branches (N>1) and would have collapsed to the last iter
@@ -483,12 +499,59 @@ func (e *Engine) consumeVerdictTx(ctx context.Context, stepInstanceID pgtype.UUI
 				action.nextSteps = append(action.nextSteps, nextStep)
 			}
 			action.kind = "advance"
+		} else if snap.OutEdgeCount(step.NodeKey) > 0 {
+			// P1-2 AC7: agent has conditional outgoing edges but none
+			// matched, and no catch-all exists. Fail-visible: step →
+			// blocked, run → paused, initiator inboxed post-commit via
+			// runSignalAction's "blocked" arm. Out-degree > 0 is the
+			// signal that an edge was modeled but skipped; out-degree 0
+			// is the legitimate chain-tail complete path below.
+			if !e.transitionStepTx(ctx, qtx, step, StepBlocked, "verdict", verdictPayload(verdict)) {
+				return none, nil
+			}
+			if !e.pauseRunTx(ctx, qtx, run) {
+				return none, nil
+			}
+			action.kind = "blocked"
 		} else {
+			if !e.transitionStepTx(ctx, qtx, step, StepPassed, "verdict", verdictPayload(verdict)) {
+				return none, nil
+			}
 			// Chain tail passed: no end node modeled — complete the run.
 			action.kind = "complete"
 		}
 
 	case VerdictFail:
+		// P1-2 AC5 fail case: when a primary (non-fan-out-child) agent
+		// has an explicit conditional outgoing edge that matches the
+		// fail verdict (e.g. `verdict.result=="fail" → rework_loop`),
+		// conditional routing takes precedence over the default
+		// retry/escalate path. Catch-all edges are intentionally
+		// ignored here (NextConditionalMatch skips nil conditions) so
+		// P0/P1-1 catch-all-only agents keep retrying on fail.
+		// fan_out children skip this block — their downstream is
+		// governed by the fan_out's fail_policy (P1-1).
+		if !step.ParentStepID.Valid {
+			if matched := snap.NextConditionalMatch(step.NodeKey, buildEvalCtx(&verdict, nil, ParseRunContext(run.Context))); matched != nil {
+				if !e.transitionStepTx(ctx, qtx, step, StepFailed, "verdict", verdictPayload(verdict)) {
+					return none, nil
+				}
+				nxt := *matched
+				nextStep, err := activateStepTx(ctx, qtx, run.ID, nxt.NodeKey)
+				if err != nil {
+					return none, err
+				}
+				for _, after := range lookaheadTargets(snap, &nxt) {
+					if err := preCreateStepTx(ctx, qtx, run.ID, after.NodeKey); err != nil {
+						return none, err
+					}
+				}
+				action.nextNodes = append(action.nextNodes, &nxt)
+				action.nextSteps = append(action.nextSteps, nextStep)
+				action.kind = "advance"
+				break
+			}
+		}
 		if step.Attempt < node.Config.EffectiveMaxAttempts() {
 			if !e.transitionStepTx(ctx, qtx, step, StepFailed, "verdict", verdictPayload(verdict)) {
 				return none, nil
@@ -1150,7 +1213,12 @@ func (e *Engine) decideAcceptanceTx(ctx context.Context, runID, acceptanceID, de
 		if !e.transitionStepTx(ctx, qtx, step, StepPassed, triggerBy, map[string]any{"acceptance_id": util.UUIDToString(acc.ID)}) {
 			return none, ErrAcceptanceConflict
 		}
-		if next := snap.NextAfterAll(step.NodeKey); len(next) > 0 {
+		// P1-2: acceptance edges are catch-all per R7, but we pass an
+		// empty-map evalCtx for signature uniformity. verdict/submission
+		// nil → buildEvalCtx emits only the run.context namespace; any var
+		// reference resolves to nil → conditions (which must be nil here
+		// anyway) fall through to catch-all.
+		if next := snap.NextAfterAll(step.NodeKey, buildEvalCtx(nil, nil, ParseRunContext(run.Context))); len(next) > 0 {
 			for _, nxt := range next {
 				nextStep, err := activateStepTx(ctx, qtx, run.ID, nxt.NodeKey)
 				if err != nil {
@@ -1308,7 +1376,10 @@ func lookaheadTargets(snap *Snapshot, node *SnapshotNode) []SnapshotNode {
 	case NodeTypeFanOut:
 		return nil
 	default:
-		return snap.NextAfterAll(node.NodeKey)
+		// Topology lookahead: pass nil evalCtx so every edge is a hit.
+		// Conditions are irrelevant — we only want the next hop's node
+		// identity for pre-creation.
+		return snap.NextAfterAll(node.NodeKey, nil)
 	}
 }
 

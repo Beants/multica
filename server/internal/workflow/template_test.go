@@ -48,10 +48,13 @@ func TestValidateTemplateGraph(t *testing.T) {
 			wantErr: "duplicate node_key",
 		},
 		{
-			name:    "branch rejected (P0 linear)",
+			// P1-2: agent branching is now ALLOWED (conditional routing).
+			// Two condition=nil edges on the same agent is the AC10
+			// ambiguous-catch-all violation.
+			name:    "agent multi catch-all rejected (AC10)",
 			nodes:   []NodeInput{node("a"), node("b"), node("c")},
 			edges:   []EdgeInput{{FromNodeKey: "a", ToNodeKey: "b"}, {FromNodeKey: "a", ToNodeKey: "c"}},
-			wantErr: "outgoing edges",
+			wantErr: "catch-all",
 		},
 		{
 			name:    "cycle rejected",

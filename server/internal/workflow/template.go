@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/internal/workflow/jsonlogic"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -166,12 +167,14 @@ type SnapshotNode struct {
 	Config  NodeConfig `json:"config"`
 }
 
-// SnapshotEdge is one frozen edge. Condition is omitted: P0 edges are always
-// condition=NULL and the engine takes the default edge by priority.
+// SnapshotEdge is one frozen edge. Condition carries the P1-2 JSONLogic
+// expression (nil = catch-all). P0/P1-1 edges are always condition=nil and
+// the engine takes the default edge by priority.
 type SnapshotEdge struct {
-	FromNodeKey string `json:"from_node_key"`
-	ToNodeKey   string `json:"to_node_key"`
-	Priority    int32  `json:"priority"`
+	FromNodeKey string          `json:"from_node_key"`
+	ToNodeKey   string          `json:"to_node_key"`
+	Priority    int32           `json:"priority"`
+	Condition   json.RawMessage `json:"condition,omitempty"`
 }
 
 // Snapshot is the frozen template graph carried by every run.
@@ -240,15 +243,30 @@ func (s *Snapshot) UpstreamNodeKeys(nodeKey string) []string {
 	return out
 }
 
-// NextAfterAll returns every node reached from nodeKey by an outgoing edge,
-// sorted by priority ascending (ties broken by ToNodeKey for stability). P0
-// linear templates have out-degree 1, so the slice length is exactly 1 for
-// mid-chain nodes and 0 at the chain tail — the P0 single-next semantics
-// are recovered as `NextAfterAll(x)[0]` (callers must nil-check the slice).
+// NextAfterAll returns the downstream node reached from nodeKey by the
+// highest-priority matching edge. P0 linear templates have out-degree 1 with
+// condition=nil (catch-all), so the slice length is exactly 1 for mid-chain
+// nodes and 0 at the chain tail — the P0 single-next semantics are recovered
+// as `NextAfterAll(x, nil)[0]` (callers must nil-check the slice).
 //
-// P0 edges carry condition=NULL; the DAG validator (Wave 0) admits fan_out
-// branching, so a fan_out node's NextAfterAll may return N > 1 elements.
-func (s *Snapshot) NextAfterAll(nodeKey string) []SnapshotNode {
+// P1-2 condition evaluation (PRD R2 + design §2.2):
+//   - evalCtx == nil: topology mode. Every edge is treated as a hit (used by
+//     DownstreamNodeKeys BFS / converge / fan_out / lookaheadTargets — none
+//     of these care about conditions). Returns ≤1 element (first by priority).
+//   - evalCtx != nil: runtime mode. condition=nil edges are catch-all
+//     candidates; condition!=nil edges are evaluated via jsonlogic.Evaluate.
+//     Returns ≤1 element: the highest-priority matching candidate.
+//
+// Returns at most ONE element (the design decision in PRD R2/Q5 + design §2.2
+// "≤1 元素切片"). P1-1 callsite loops over the slice are stable under 0/1
+// elements. Future P1-9 fan_out multi-activation will add a separate
+// NextAfterAllMatched API rather than broaden this return shape.
+//
+// Sort order: priority ASC, then ToNodeKey ASC for determinism. The DB
+// EvaluateEdges query also orders by created_at ASC, but SnapshotEdge does
+// not carry CreatedAt (the frozen JSON form loses it); ToNodeKey is the
+// stable proxy and matches the existing P0/P1-1 tie-break behavior.
+func (s *Snapshot) NextAfterAll(nodeKey string, evalCtx map[string]any) []SnapshotNode {
 	type cand struct {
 		idx      int
 		priority int32
@@ -259,7 +277,22 @@ func (s *Snapshot) NextAfterAll(nodeKey string) []SnapshotNode {
 		if e.FromNodeKey != nodeKey {
 			continue
 		}
-		cands = append(cands, cand{idx: i, priority: e.Priority, toKey: e.ToNodeKey})
+		if evalCtx == nil {
+			// Topology mode: every edge is a candidate.
+			cands = append(cands, cand{idx: i, priority: e.Priority, toKey: e.ToNodeKey})
+			continue
+		}
+		// Runtime mode: nil condition = catch-all; non-nil evaluates.
+		if len(e.Condition) == 0 {
+			cands = append(cands, cand{idx: i, priority: e.Priority, toKey: e.ToNodeKey})
+			continue
+		}
+		if edgeConditionMatches(e.Condition, evalCtx) {
+			cands = append(cands, cand{idx: i, priority: e.Priority, toKey: e.ToNodeKey})
+		}
+	}
+	if len(cands) == 0 {
+		return nil
 	}
 	// Stable order: priority asc, then ToNodeKey asc — deterministic across
 	// equal-priority edges so test assertions and downstream activation are
@@ -270,24 +303,93 @@ func (s *Snapshot) NextAfterAll(nodeKey string) []SnapshotNode {
 		}
 		return cands[i].toKey < cands[j].toKey
 	})
-	out := make([]SnapshotNode, 0, len(cands))
-	for _, c := range cands {
-		if n := s.NodeByKey(s.Edges[c.idx].ToNodeKey); n != nil {
-			out = append(out, *n)
+	c := cands[0]
+	if n := s.NodeByKey(s.Edges[c.idx].ToNodeKey); n != nil {
+		return []SnapshotNode{*n}
+	}
+	return nil
+}
+
+// edgeConditionMatches unmarshals a JSONLogic condition and evaluates it.
+// Returns false on any unmarshal/eval failure (PRD R5: runtime evaluation
+// failure → condition not matched → falls through to catch-all or blocked).
+func edgeConditionMatches(cond json.RawMessage, evalCtx map[string]any) bool {
+	var expr map[string]any
+	if err := json.Unmarshal(cond, &expr); err != nil {
+		return false
+	}
+	return jsonlogic.Evaluate(expr, evalCtx)
+}
+
+// OutEdgeCount returns the number of outgoing edges from nodeKey. Used by
+// callers (e.g. activateFanOutNode's P1-1 single-edge guard) that need the
+// RAW edge count — NextAfterAll returns ≤1 element regardless of how many
+// edges exist, because it makes the routing decision.
+func (s *Snapshot) OutEdgeCount(nodeKey string) int {
+	n := 0
+	for _, e := range s.Edges {
+		if e.FromNodeKey == nodeKey {
+			n++
 		}
 	}
-	return out
+	return n
+}
+
+// NextConditionalMatch returns the first outgoing edge from nodeKey whose
+// Condition is non-nil AND matches evalCtx. Catch-all edges
+// (Condition == nil) are intentionally skipped — VerdictFail's
+// conditional-routing arm (engine.go consumeVerdictTx) uses this so that
+// fail-verdict routing fires only on an explicit `verdict.result=="fail"`
+// style condition; a catch-all on a fail verdict must fall through to the
+// P0 retry/escalate path (P0/P1-1 back-compat: catch-all-only agents
+// retry rather than silently advancing on failure).
+//
+// Sort order matches NextAfterAll: priority ASC, then ToNodeKey ASC. Returns
+// nil when no explicit conditional edge matches.
+func (s *Snapshot) NextConditionalMatch(nodeKey string, evalCtx map[string]any) *SnapshotNode {
+	type cand struct {
+		idx      int
+		priority int32
+		toKey    string
+	}
+	var cands []cand
+	for i, e := range s.Edges {
+		if e.FromNodeKey != nodeKey || len(e.Condition) == 0 {
+			continue
+		}
+		if edgeConditionMatches(e.Condition, evalCtx) {
+			cands = append(cands, cand{idx: i, priority: e.Priority, toKey: e.ToNodeKey})
+		}
+	}
+	if len(cands) == 0 {
+		return nil
+	}
+	sort.Slice(cands, func(i, j int) bool {
+		if cands[i].priority != cands[j].priority {
+			return cands[i].priority < cands[j].priority
+		}
+		return cands[i].toKey < cands[j].toKey
+	})
+	if n := s.NodeByKey(s.Edges[cands[0].idx].ToNodeKey); n != nil {
+		return n
+	}
+	return nil
 }
 
 // DownstreamNodeKeys returns every transitive descendant of nodeKey in the
-// DAG (exclusive of nodeKey itself), discovered by BFS over NextAfterAll.
-// The visited map makes the walk cycle-safe even when the graph is
+// DAG (exclusive of nodeKey itself), discovered by BFS over the raw edge
+// list. The visited map makes the walk cycle-safe even when the graph is
 // malformed at runtime (publish validation rejects cycles, but a hand-edited
 // snapshot could still loop).
 //
 // Rework invalidates exactly this set (design.md §4.4). For P0 linear
 // templates the BFS degenerates to the original chain walk and returns the
 // same node list, in chain order.
+//
+// P1-2 note: iterates snap.Edges directly (NOT NextAfterAll) because BFS
+// needs to see every branch — NextAfterAll returns ≤1 element per node
+// (the runtime routing decision), which would silently drop fan_out siblings
+// and converge inbound during a topology walk.
 func (s *Snapshot) DownstreamNodeKeys(nodeKey string) []string {
 	visited := map[string]bool{nodeKey: true}
 	var out []string
@@ -295,13 +397,16 @@ func (s *Snapshot) DownstreamNodeKeys(nodeKey string) []string {
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
-		for _, next := range s.NextAfterAll(cur) {
-			if visited[next.NodeKey] {
+		for _, e := range s.Edges {
+			if e.FromNodeKey != cur {
 				continue
 			}
-			visited[next.NodeKey] = true
-			out = append(out, next.NodeKey)
-			queue = append(queue, next.NodeKey)
+			if visited[e.ToNodeKey] {
+				continue
+			}
+			visited[e.ToNodeKey] = true
+			out = append(out, e.ToNodeKey)
+			queue = append(queue, e.ToNodeKey)
 		}
 	}
 	return out
@@ -352,11 +457,14 @@ type NodeInput struct {
 }
 
 // EdgeInput is one edge in a create/update call, keyed by node_key (row IDs
-// are assigned at insert time).
+// are assigned at insert time). Condition is the P1-2 JSONLogic expression
+// (nil = catch-all). Non-agent edges must leave Condition nil — enforced by
+// validateEdgeConditions at publish.
 type EdgeInput struct {
 	FromNodeKey string
 	ToNodeKey   string
 	Priority    int32
+	Condition   json.RawMessage
 }
 
 // TemplateDetail is the full template read model (template + graph).
@@ -446,8 +554,12 @@ func validateTemplateGraph(nodes []NodeInput, edges []EdgeInput) error {
 		inDegree[e.ToNodeKey]++
 		outDegree[e.FromNodeKey]++
 	}
-	// Per-type out-degree check. fan_out is the only branching type; every
-	// other type keeps P0's out-degree ≤ 1 invariant (0 = chain tail).
+	// Per-type out-degree check.
+	//   - fan_out: ≥ 1 (the branching node — may have many downstreams)
+	//   - agent: P1-2 removes the upper bound (conditional routing allows
+	//     multi-edge); out-degree 0 stays legal for terminal agent nodes
+	//     (chain-tail case where the engine completes the run on pass).
+	//   - acceptance / converge / end: ≤ 1 (structural pass-through)
 	for _, n := range nodes {
 		got := outDegree[n.NodeKey]
 		switch n.Type {
@@ -455,9 +567,11 @@ func validateTemplateGraph(nodes []NodeInput, edges []EdgeInput) error {
 			if got < 1 {
 				return fmt.Errorf("workflow: fan_out node %q requires at least 1 outgoing edge", n.NodeKey)
 			}
+		case NodeTypeAgent:
+			// P1-2: no upper bound. Lower bound is 0 (terminal agent).
 		default:
 			if got > 1 {
-				return fmt.Errorf("workflow: node %q has %d outgoing edges, want at most 1 (only fan_out may branch)", n.NodeKey, got)
+				return fmt.Errorf("workflow: node %q has %d outgoing edges, want at most 1 (only agent/fan_out may branch)", n.NodeKey, got)
 			}
 		}
 	}
@@ -529,6 +643,57 @@ func validateTemplateGraph(nodes []NodeInput, edges []EdgeInput) error {
 	// check so cycle/orphan errors surface first.
 	if err := ValidateConvergePairing(nodes, edges); err != nil {
 		return err
+	}
+	// P1-2: edge condition schema + agent-only + single catch-all check.
+	if err := validateEdgeConditions(nodes, edges); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateEdgeConditions enforces the P1-2 conditional-routing rules (PRD R4
+// + R7 + AC2/AC4/AC10):
+//   - Only agent edges may carry a non-nil condition. acceptance/fan_out/
+//     converge/end edges must be catch-all (their downstream semantics are
+//     structural, not data-driven).
+//   - Each condition must be a structurally valid JSONLogic expression
+//     (left-shift schema validation at publish time per PRD R4).
+//   - AC10: an agent node may have at most one catch-all (condition=nil)
+//     outgoing edge. Multiple catch-all edges on the same agent make the
+//     routing ambiguous (no deterministic priority tiebreak among equals).
+//     fan_out's multi-edge case is exempted — its semantics are P1-1 fan-out
+//     branches, not conditional routing.
+func validateEdgeConditions(nodes []NodeInput, edges []EdgeInput) error {
+	nodeType := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		nodeType[n.NodeKey] = n.Type
+	}
+	agentCatchAll := map[string]int{} // by from_node_key, agent only
+	for _, e := range edges {
+		fromType := nodeType[e.FromNodeKey]
+		if len(e.Condition) == 0 {
+			if fromType == NodeTypeAgent {
+				agentCatchAll[e.FromNodeKey]++
+			}
+			continue
+		}
+		// condition != nil: only agent edges may carry it.
+		if fromType != NodeTypeAgent {
+			return fmt.Errorf(
+				"workflow: edge %q → %q carries a condition, but only agent edges may (from-node type %q)",
+				e.FromNodeKey, e.ToNodeKey, fromType)
+		}
+		if err := jsonlogic.ValidateSchema(e.Condition); err != nil {
+			return fmt.Errorf("workflow: edge %q → %q condition invalid: %w", e.FromNodeKey, e.ToNodeKey, err)
+		}
+	}
+	// AC10: at most one catch-all per agent node.
+	for fromKey, n := range agentCatchAll {
+		if n > 1 {
+			return fmt.Errorf(
+				"workflow: agent node %q has %d catch-all (condition=nil) edges; at most one is allowed to keep routing deterministic",
+				fromKey, n)
+		}
 	}
 	return nil
 }
@@ -614,7 +779,7 @@ func insertGraph(ctx context.Context, qtx *db.Queries, templateID pgtype.UUID, i
 			FromNodeID: idByKey[e.FromNodeKey],
 			ToNodeID:   idByKey[e.ToNodeKey],
 			Priority:   e.Priority,
-			Condition:  nil, // P0: always NULL (design.md §1)
+			Condition:  e.Condition, // P1-2: JSONLogic expression (nil = catch-all)
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("create edge %q → %q: %w", e.FromNodeKey, e.ToNodeKey, err)
@@ -794,7 +959,7 @@ func (s *TemplateService) CreateTemplateVersion(ctx context.Context, workspaceID
 			FromNodeID: idByKey[fromKey],
 			ToNodeID:   idByKey[toKey],
 			Priority:   e.Priority,
-			Condition:  nil,
+			Condition:  e.Condition, // P1-2: preserve condition on version fork
 		}); err != nil {
 			return nil, fmt.Errorf("copy edge %q → %q: %w", fromKey, toKey, err)
 		}
@@ -839,6 +1004,7 @@ func (s *TemplateService) PublishTemplate(ctx context.Context, workspaceID, temp
 			FromNodeKey: keyByID[util.UUIDToString(e.FromNodeID)],
 			ToNodeKey:   keyByID[util.UUIDToString(e.ToNodeID)],
 			Priority:    e.Priority,
+			Condition:   json.RawMessage(e.Condition), // P1-2: re-validate on publish
 		})
 	}
 	if err := validateTemplateGraph(nodeInputs, edgeInputs); err != nil {
@@ -851,7 +1017,7 @@ func (s *TemplateService) PublishTemplate(ctx context.Context, workspaceID, temp
 		snap.Nodes = append(snap.Nodes, SnapshotNode{NodeKey: n.NodeKey, Type: n.Type, Name: n.Name, Config: configByKey[n.NodeKey]})
 	}
 	for _, e := range edgeInputs {
-		snap.Edges = append(snap.Edges, SnapshotEdge{FromNodeKey: e.FromNodeKey, ToNodeKey: e.ToNodeKey, Priority: e.Priority})
+		snap.Edges = append(snap.Edges, SnapshotEdge{FromNodeKey: e.FromNodeKey, ToNodeKey: e.ToNodeKey, Priority: e.Priority, Condition: e.Condition})
 	}
 
 	tx, err := s.TxStarter.Begin(ctx)
@@ -1008,6 +1174,7 @@ func BuildSnapshot(ctx context.Context, q *db.Queries, tmpl db.WorkflowTemplate)
 			FromNodeKey: idToKey[util.UUIDToString(e.FromNodeID)],
 			ToNodeKey:   idToKey[util.UUIDToString(e.ToNodeID)],
 			Priority:    e.Priority,
+			Condition:   json.RawMessage(e.Condition), // P1-2: frozen JSONLogic expr (nil = catch-all)
 		})
 	}
 	return snap, nil

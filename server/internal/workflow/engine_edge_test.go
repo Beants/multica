@@ -45,13 +45,15 @@ func TestSnapshotHelpers(t *testing.T) {
 	if got := snap.StartNode(); got == nil || got.NodeKey != "a" {
 		t.Fatalf("start node = %v, want a", got)
 	}
-	// NextAfterAll returns every downstream sorted by priority asc; ties
-	// broken by ToNodeKey. a→c (priority 1) precedes a→b (priority 2).
-	nexts := snap.NextAfterAll("a")
-	if len(nexts) != 2 || nexts[0].NodeKey != "c" || nexts[1].NodeKey != "b" {
-		t.Fatalf("NextAfterAll(a) = %+v, want [c b] (priority 1 beats 2)", nexts)
+	// P1-2: NextAfterAll returns ≤1 element — the priority-first candidate.
+	// a→c (priority 1) beats a→b (priority 2); topology mode (nil evalCtx)
+	// returns [c] only. The old P0 multi-element return is gone (Wave 2
+	// design.md §2.2 "≤1 元素切片"); BFS helpers iterate edges directly.
+	nexts := snap.NextAfterAll("a", nil)
+	if len(nexts) != 1 || nexts[0].NodeKey != "c" {
+		t.Fatalf("NextAfterAll(a, nil) = %+v, want [c] (priority 1 beats 2)", nexts)
 	}
-	if got := snap.NextAfterAll("c"); len(got) != 0 {
+	if got := snap.NextAfterAll("c", nil); len(got) != 0 {
 		t.Fatalf("NextAfterAll(c) = %+v, want empty (chain tail)", got)
 	}
 	if snap.NodeByKey("zzz") != nil {
@@ -930,7 +932,9 @@ func TestTemplateCreateUpdateValidation(t *testing.T) {
 	}
 
 	draft := f.createDraft(ctx, "upd-validate")
-	// ReplaceGraph with an invalid graph fails before any write.
+	// ReplaceGraph with an invalid graph fails before any write. P1-2: agent
+	// nodes now allow multi-edge (conditional routing), but two condition=nil
+	// edges on the same agent is the AC10 ambiguous-catch-all violation.
 	if _, err := f.templates.UpdateTemplate(ctx, UpdateTemplateParams{
 		WorkspaceID: wsID, TemplateID: draft.Template.ID, ReplaceGraph: true,
 		Nodes: []NodeInput{
@@ -939,8 +943,8 @@ func TestTemplateCreateUpdateValidation(t *testing.T) {
 			agentNode("c", RoleExecutor, "Executor Agent", NodeConfig{}),
 		},
 		Edges: []EdgeInput{{FromNodeKey: "a", ToNodeKey: "b"}, {FromNodeKey: "a", ToNodeKey: "c"}},
-	}); err == nil || !strings.Contains(err.Error(), "outgoing edge") {
-		t.Fatalf("invalid replacement graph = %v, want out-degree error", err)
+	}); err == nil || !strings.Contains(err.Error(), "catch-all") {
+		t.Fatalf("invalid replacement graph = %v, want catch-all error (AC10)", err)
 	}
 	// A template owned by another workspace reads as not-found.
 	name := "cross-workspace"
