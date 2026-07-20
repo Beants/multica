@@ -305,6 +305,61 @@ func (q *Queries) ListStepInstancesForRun(ctx context.Context, runID pgtype.UUID
 	return items, nil
 }
 
+const listStepInstancesNeedingSweep = `-- name: ListStepInstancesNeedingSweep :many
+SELECT si.id, si.run_id, si.node_key, si.status, si.agent_id, si.agent_task_id, si.issue_id, si.parent_step_id, si.attempt, si.exit_fields, si.started_at, si.finished_at, si.deadline_at, si.created_at, si.updated_at FROM step_instance si
+JOIN workflow_run wr ON si.run_id = wr.id
+WHERE wr.status = 'running'
+  AND si.status IN ('active', 'running', 'blocked')
+  AND (
+        si.agent_task_id IS NULL
+        OR (si.status = 'running' AND si.deadline_at IS NOT NULL AND si.deadline_at < now())
+        OR (si.status = 'blocked' AND si.started_at IS NOT NULL AND si.started_at < now() - ($1::int || ' seconds')::interval)
+      )
+ORDER BY si.started_at ASC NULLS LAST, si.created_at ASC
+`
+
+// P1-5 sweeper candidate set (workflow/seed.go §P1-5): step_instance joined
+// to a still-running workflow_run, in one of the in-flight statuses, AND
+// matching at least one self-heal condition. The sweeper classifies each row
+// by which condition matched (no agent_task_id / deadline expired / blocked
+// too long) and routes it through the engine helpers — never via raw
+// agent_task_queue writes (see sweeper.go boundary comment).
+func (q *Queries) ListStepInstancesNeedingSweep(ctx context.Context, dollar_1 int32) ([]StepInstance, error) {
+	rows, err := q.db.Query(ctx, listStepInstancesNeedingSweep, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StepInstance{}
+	for rows.Next() {
+		var i StepInstance
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.NodeKey,
+			&i.Status,
+			&i.AgentID,
+			&i.AgentTaskID,
+			&i.IssueID,
+			&i.ParentStepID,
+			&i.Attempt,
+			&i.ExitFields,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.DeadlineAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateStepInstanceDispatch = `-- name: UpdateStepInstanceDispatch :one
 UPDATE step_instance
 SET agent_id = $2,

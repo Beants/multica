@@ -79,3 +79,21 @@ SET exit_fields = $2,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: ListStepInstancesNeedingSweep :many
+-- P1-5 sweeper candidate set (workflow/seed.go §P1-5): step_instance joined
+-- to a still-running workflow_run, in one of the in-flight statuses, AND
+-- matching at least one self-heal condition. The sweeper classifies each row
+-- by which condition matched (no agent_task_id / deadline expired / blocked
+-- too long) and routes it through the engine helpers — never via raw
+-- agent_task_queue writes (see sweeper.go boundary comment).
+SELECT si.* FROM step_instance si
+JOIN workflow_run wr ON si.run_id = wr.id
+WHERE wr.status = 'running'
+  AND si.status IN ('active', 'running', 'blocked')
+  AND (
+        si.agent_task_id IS NULL
+        OR (si.status = 'running' AND si.deadline_at IS NOT NULL AND si.deadline_at < now())
+        OR (si.status = 'blocked' AND si.started_at IS NOT NULL AND si.started_at < now() - ($1::int || ' seconds')::interval)
+      )
+ORDER BY si.started_at ASC NULLS LAST, si.created_at ASC;

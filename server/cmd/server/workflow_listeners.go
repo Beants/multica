@@ -30,6 +30,17 @@ func newWorkflowEngineForListeners(h *handler.Handler) *workflow.Engine {
 	return workflow.NewEngine(h.Queries, h.TxStarter, h.IssueService, h.TaskService, h.Bus)
 }
 
+// workflowFlagGuard returns the per-workspace workflow_engine flag check
+// used by both the listener subscriptions and the P1-5 sweeper. Shared
+// here so main.go's sweep registration stays inside its touch budget
+// (one goroutine launch line).
+func workflowFlagGuard(flags *featureflag.Service) func(workspaceID string) bool {
+	return func(workspaceID string) bool {
+		evalCtx := featureflag.WithEvalContext(context.Background(), featureflag.EvalContext{WorkspaceID: workspaceID})
+		return flags.IsEnabled(evalCtx, workflow.FlagEngine, false)
+	}
+}
+
 // registerWorkflowListeners subscribes the engine to the daemon task
 // lifecycle (design.md §4.4):
 //   - task:dispatch  → step active → dispatched (guarded)
@@ -40,10 +51,7 @@ func newWorkflowEngineForListeners(h *handler.Handler) *workflow.Engine {
 func registerWorkflowListeners(bus *events.Bus, eng *workflow.Engine, flags *featureflag.Service) {
 	ctx := context.Background()
 
-	enabled := func(workspaceID string) bool {
-		evalCtx := featureflag.WithEvalContext(ctx, featureflag.EvalContext{WorkspaceID: workspaceID})
-		return flags.IsEnabled(evalCtx, workflow.FlagEngine, false)
-	}
+	enabled := workflowFlagGuard(flags)
 	taskIDOf := func(e events.Event) (pgtype.UUID, bool) {
 		payload, ok := e.Payload.(map[string]any)
 		if !ok {

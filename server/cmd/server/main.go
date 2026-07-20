@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/workflow"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/redis/go-redis/v9"
@@ -376,6 +377,11 @@ func main() {
 	registerAutopilotListeners(bus, autopilotSvc)
 	workflowEngine := newWorkflowEngineForListeners(h)
 	registerWorkflowListeners(bus, workflowEngine, flags)
+
+	// P1-5: workflow sweeper (re-dispatch taskless steps / reset deadline-
+	// expired / pause runs with long-blocked steps). Same ctx as the
+	// runtime sweeper so both wind down together on shutdown.
+	go workflow.NewSweeper(workflowEngine, workflowFlagGuard(flags)).Run(sweepCtx)
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
 	// handler. Both the heartbeat write path (handler) and the sweeper read
