@@ -127,7 +127,23 @@ type NodeConfig struct {
 	GateLanguage       string `json:"gate_language,omitempty"`
 	GateTimeoutSeconds int32  `json:"gate_timeout_seconds,omitempty"`
 	GateOnFail         string `json:"gate_on_fail,omitempty"`
+
+	// P1-7 capability routing. DispatchStrategy selects how activateAgentNode
+	// resolves the agent. Capability breaks D-7's publish-only resolve on
+	// purpose (proficiency is dynamic); specified/fallback use the publish-
+	// resolved AgentID. RequiredCapabilities is the capability_key list a
+	// capability-strategy node demands (ALL must be declared with
+	// proficiency > 0 on a workspace agent).
+	DispatchStrategy     string   `json:"dispatch_strategy,omitempty"`
+	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
 }
+
+// P1-7 dispatch strategies (NodeConfig.DispatchStrategy values).
+const (
+	DispatchStrategySpecified  = "specified"  // default: node.Config.AgentID (publish-resolved)
+	DispatchStrategyCapability = "capability" // MatchAgentByCapability; miss → AgentID fallback
+	DispatchStrategyFallback   = "fallback"   // explicit fallback to AgentID
+)
 
 // EffectiveRole defaults an unset role to executor (design.md §4.3).
 func (c NodeConfig) EffectiveRole() string {
