@@ -326,7 +326,14 @@ func (e *Engine) StartRun(ctx context.Context, p StartRunParams) (db.WorkflowRun
 	if err != nil {
 		return db.WorkflowRun{}, false, fmt.Errorf("activate start node: %w", err)
 	}
-	if next := snap.NextAfterAll(startNode.NodeKey); len(next) > 0 {
+	// P1-2: StartRun uses an empty-map evalCtx (not nil) so that any
+	// hypothetical condition on a startNode downstream resolves var
+	// references to nil → falls through to catch-all. nil would mean
+	// "topology mode: every edge hits", which is also fine in practice
+	// (startNode downstreams are catch-all per the seed shapes), but
+	// empty-map is the semantically honest choice for runtime invocation.
+	startEvalCtx := buildEvalCtx(nil, nil, runCtx)
+	if next := snap.NextAfterAll(startNode.NodeKey, startEvalCtx); len(next) > 0 {
 		for _, n := range next {
 			if err := preCreateStepTx(ctx, qtx, run.ID, n.NodeKey); err != nil {
 				return db.WorkflowRun{}, false, fmt.Errorf("pre-create next node: %w", err)
@@ -462,7 +469,7 @@ func (e *Engine) consumeVerdictTx(ctx context.Context, stepInstanceID pgtype.UUI
 				return none, err
 			}
 			action.converge = effect
-		} else if next := snap.NextAfterAll(step.NodeKey); len(next) > 0 {
+		} else if next := snap.NextAfterAll(step.NodeKey, buildEvalCtx(&verdict, &submission, ParseRunContext(run.Context))); len(next) > 0 {
 			// Wave 0 P0 invariant: agent/acceptance nodes have out-degree
 			// 1, so this loop runs once for linear templates. fan_out
 			// branches (N>1) and would have collapsed to the last iter
@@ -1150,7 +1157,12 @@ func (e *Engine) decideAcceptanceTx(ctx context.Context, runID, acceptanceID, de
 		if !e.transitionStepTx(ctx, qtx, step, StepPassed, triggerBy, map[string]any{"acceptance_id": util.UUIDToString(acc.ID)}) {
 			return none, ErrAcceptanceConflict
 		}
-		if next := snap.NextAfterAll(step.NodeKey); len(next) > 0 {
+		// P1-2: acceptance edges are catch-all per R7, but we pass an
+		// empty-map evalCtx for signature uniformity. verdict/submission
+		// nil → buildEvalCtx emits only the run.context namespace; any var
+		// reference resolves to nil → conditions (which must be nil here
+		// anyway) fall through to catch-all.
+		if next := snap.NextAfterAll(step.NodeKey, buildEvalCtx(nil, nil, ParseRunContext(run.Context))); len(next) > 0 {
 			for _, nxt := range next {
 				nextStep, err := activateStepTx(ctx, qtx, run.ID, nxt.NodeKey)
 				if err != nil {
@@ -1308,7 +1320,10 @@ func lookaheadTargets(snap *Snapshot, node *SnapshotNode) []SnapshotNode {
 	case NodeTypeFanOut:
 		return nil
 	default:
-		return snap.NextAfterAll(node.NodeKey)
+		// Topology lookahead: pass nil evalCtx so every edge is a hit.
+		// Conditions are irrelevant — we only want the next hop's node
+		// identity for pre-creation.
+		return snap.NextAfterAll(node.NodeKey, nil)
 	}
 }
 

@@ -6,6 +6,7 @@ package workflow
 // semantics while admitting fan_out branching.
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -114,9 +115,12 @@ func TestValidateGraphDAG_FanOutWithoutConvergeRejected(t *testing.T) {
 	}
 }
 
-func TestValidateGraphDAG_AgentBranchingRejected(t *testing.T) {
+// TestValidateGraphDAG_AgentBranchingAllowed_P1_2 (P1-2): agent nodes MAY
+// branch via conditional routing. Multi catch-all (two condition=nil edges
+// on the same agent) is the AC10 violation; distinct conditions are fine.
+func TestValidateGraphDAG_AgentBranchingAllowed_P1_2(t *testing.T) {
 	t.Parallel()
-	// An agent node may not branch — only fan_out can.
+	// Two condition=nil edges on agent "a" → AC10 ambiguous catch-all.
 	nodes := []NodeInput{
 		agentNode("a", RoleExecutor, "Agent", NodeConfig{}),
 		agentNode("b", RoleExecutor, "Agent", NodeConfig{}),
@@ -127,8 +131,23 @@ func TestValidateGraphDAG_AgentBranchingRejected(t *testing.T) {
 		{FromNodeKey: "a", ToNodeKey: "c"},
 	}
 	err := validateTemplateGraph(nodes, edges)
-	if err == nil || !strings.Contains(err.Error(), "only fan_out may branch") {
-		t.Fatalf("agent branching = %v, want 'only fan_out may branch' error", err)
+	if err == nil || !strings.Contains(err.Error(), "catch-all") {
+		t.Fatalf("agent multi catch-all = %v, want AC10 rejection", err)
+	}
+
+	// One conditional + one catch-all on agent "a" → P1-2 legal routing.
+	cond := json.RawMessage(`{"==":[{"var":"verdict.result"},"pass"]}`)
+	nodes2 := []NodeInput{
+		agentNode("a", RoleExecutor, "Agent", NodeConfig{}),
+		agentNode("b", RoleExecutor, "Agent", NodeConfig{}),
+		agentNode("c", RoleExecutor, "Agent", NodeConfig{}),
+	}
+	edges2 := []EdgeInput{
+		{FromNodeKey: "a", ToNodeKey: "b", Priority: 1, Condition: cond},
+		{FromNodeKey: "a", ToNodeKey: "c", Priority: 2}, // catch-all
+	}
+	if err := validateTemplateGraph(nodes2, edges2); err != nil {
+		t.Fatalf("agent conditional + catch-all must PASS under P1-2: %v", err)
 	}
 }
 
@@ -194,7 +213,7 @@ func TestValidateGraphDAG_FanOutMustHaveOutbound(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Snapshot.NextAfterAll (Wave 0.3)
+// Snapshot.NextAfterAll (Wave 0.3 + P1-2 condition routing)
 // ---------------------------------------------------------------------------
 
 func TestNextAfterAll_LinearReturnsOne(t *testing.T) {
@@ -207,63 +226,40 @@ func TestNextAfterAll_LinearReturnsOne(t *testing.T) {
 		},
 	}
 	// P0 invariant: mid-chain nodes return a 1-element slice.
-	if got := snap.NextAfterAll("a"); len(got) != 1 || got[0].NodeKey != "b" {
+	// P1-2: nil evalCtx = topology mode (all edges hit; ≤1 element return).
+	if got := snap.NextAfterAll("a", nil); len(got) != 1 || got[0].NodeKey != "b" {
 		t.Fatalf("NextAfterAll(a) = %+v, want [b]", got)
 	}
-	if got := snap.NextAfterAll("b"); len(got) != 1 || got[0].NodeKey != "c" {
+	if got := snap.NextAfterAll("b", nil); len(got) != 1 || got[0].NodeKey != "c" {
 		t.Fatalf("NextAfterAll(b) = %+v, want [c]", got)
 	}
 }
 
-func TestNextAfterAll_FanOutReturnsMany(t *testing.T) {
+// TestNextAfterAll_TopologyModeReturnsFirstByPriority (P1-2): nil evalCtx is
+// topology mode. A multi-edge node returns ≤1 element — the highest-priority
+// candidate. This replaces the P0/Wave-0 behavior where NextAfterAll returned
+// N elements (the slice-based signalAction loop now sees 0/1 elements; future
+// P1-9 fan_out multi-activation will add a separate NextAfterAllMatched API).
+func TestNextAfterAll_TopologyModeReturnsFirstByPriority(t *testing.T) {
 	t.Parallel()
 	snap := &Snapshot{
 		Nodes: []SnapshotNode{{NodeKey: "f"}, {NodeKey: "x"}, {NodeKey: "y"}, {NodeKey: "z"}},
 		Edges: []SnapshotEdge{
-			{FromNodeKey: "f", ToNodeKey: "x"},
-			{FromNodeKey: "f", ToNodeKey: "y"},
-			{FromNodeKey: "f", ToNodeKey: "z"},
+			{FromNodeKey: "f", ToNodeKey: "x", Priority: 30},
+			{FromNodeKey: "f", ToNodeKey: "y", Priority: 10},
+			{FromNodeKey: "f", ToNodeKey: "z", Priority: 20},
 		},
 	}
-	got := snap.NextAfterAll("f")
-	if len(got) != 3 {
-		t.Fatalf("NextAfterAll(f) = %+v, want 3 elements", got)
-	}
-	seen := map[string]bool{}
-	for _, n := range got {
-		seen[n.NodeKey] = true
-	}
-	if !seen["x"] || !seen["y"] || !seen["z"] {
-		t.Fatalf("NextAfterAll(f) missing branches: %+v", seen)
-	}
-}
-
-func TestNextAfterAll_PriorityOrder(t *testing.T) {
-	t.Parallel()
-	// Three edges from `root` with mixed priorities. Output must be ASC.
-	snap := &Snapshot{
-		Nodes: []SnapshotNode{{NodeKey: "root"}, {NodeKey: "p1"}, {NodeKey: "p2"}, {NodeKey: "p3"}},
-		Edges: []SnapshotEdge{
-			{FromNodeKey: "root", ToNodeKey: "p3", Priority: 30},
-			{FromNodeKey: "root", ToNodeKey: "p1", Priority: 10},
-			{FromNodeKey: "root", ToNodeKey: "p2", Priority: 20},
-		},
-	}
-	got := snap.NextAfterAll("root")
-	if len(got) != 3 {
-		t.Fatalf("len = %d, want 3", len(got))
-	}
-	want := []string{"p1", "p2", "p3"}
-	for i, w := range want {
-		if got[i].NodeKey != w {
-			t.Fatalf("NextAfterAll order[%d] = %q, want %q (full: %+v)", i, got[i].NodeKey, w, got)
-		}
+	got := snap.NextAfterAll("f", nil)
+	if len(got) != 1 || got[0].NodeKey != "y" {
+		t.Fatalf("NextAfterAll(f, nil) = %+v, want [y] (priority 10 wins)", got)
 	}
 }
 
 func TestNextAfterAll_PriorityTieBrokenByToKey(t *testing.T) {
 	t.Parallel()
-	// Two edges with equal priority — tie broken alphabetically by ToNodeKey.
+	// Equal-priority edges — tie broken alphabetically by ToNodeKey. The
+	// topology-mode return is the single first element ("a").
 	snap := &Snapshot{
 		Nodes: []SnapshotNode{{NodeKey: "root"}, {NodeKey: "z"}, {NodeKey: "a"}, {NodeKey: "m"}},
 		Edges: []SnapshotEdge{
@@ -272,15 +268,9 @@ func TestNextAfterAll_PriorityTieBrokenByToKey(t *testing.T) {
 			{FromNodeKey: "root", ToNodeKey: "m", Priority: 5},
 		},
 	}
-	got := snap.NextAfterAll("root")
-	if len(got) != 3 {
-		t.Fatalf("len = %d, want 3", len(got))
-	}
-	want := []string{"a", "m", "z"}
-	for i, w := range want {
-		if got[i].NodeKey != w {
-			t.Fatalf("tie-break order[%d] = %q, want %q", i, got[i].NodeKey, w)
-		}
+	got := snap.NextAfterAll("root", nil)
+	if len(got) != 1 || got[0].NodeKey != "a" {
+		t.Fatalf("NextAfterAll(root, nil) = %+v, want [a] (alphabetical tiebreak)", got)
 	}
 }
 
@@ -290,11 +280,211 @@ func TestNextAfterAll_TailReturnsEmpty(t *testing.T) {
 		Nodes: []SnapshotNode{{NodeKey: "a"}, {NodeKey: "b"}},
 		Edges: []SnapshotEdge{{FromNodeKey: "a", ToNodeKey: "b"}},
 	}
-	if got := snap.NextAfterAll("b"); len(got) != 0 {
+	if got := snap.NextAfterAll("b", nil); len(got) != 0 {
 		t.Fatalf("NextAfterAll(b) = %+v, want empty (tail)", got)
 	}
-	if got := snap.NextAfterAll("unknown"); len(got) != 0 {
+	if got := snap.NextAfterAll("unknown", nil); len(got) != 0 {
 		t.Fatalf("NextAfterAll(unknown) = %+v, want empty", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot.NextAfterAll P1-2 condition routing (Wave 2)
+// ---------------------------------------------------------------------------
+
+// jsonRaw is a tiny test helper for inline JSON condition literals.
+func jsonRaw(t *testing.T, expr string) json.RawMessage {
+	t.Helper()
+	return json.RawMessage(expr)
+}
+
+// TestNextAfterAll_ConditionMatchedBranch (PRD AC5): verdict=pass routes to
+// branch A, verdict=fail routes to branch B. Two conditional edges with
+// distinct priorities — the matched one wins regardless of priority.
+func TestNextAfterAll_ConditionMatchedBranch(t *testing.T) {
+	t.Parallel()
+	passExpr := jsonRaw(t, `{"==":[{"var":"verdict.result"},"pass"]}`)
+	failExpr := jsonRaw(t, `{"==":[{"var":"verdict.result"},"fail"]}`)
+	snap := &Snapshot{
+		Nodes: []SnapshotNode{{NodeKey: "decide"}, {NodeKey: "onPass"}, {NodeKey: "onFail"}},
+		Edges: []SnapshotEdge{
+			{FromNodeKey: "decide", ToNodeKey: "onPass", Priority: 1, Condition: passExpr},
+			{FromNodeKey: "decide", ToNodeKey: "onFail", Priority: 2, Condition: failExpr},
+		},
+	}
+	passCtx := map[string]any{"verdict": map[string]any{"result": "pass"}}
+	got := snap.NextAfterAll("decide", passCtx)
+	if len(got) != 1 || got[0].NodeKey != "onPass" {
+		t.Fatalf("verdict=pass routes to %+v, want [onPass]", got)
+	}
+	failCtx := map[string]any{"verdict": map[string]any{"result": "fail"}}
+	got = snap.NextAfterAll("decide", failCtx)
+	if len(got) != 1 || got[0].NodeKey != "onFail" {
+		t.Fatalf("verdict=fail routes to %+v, want [onFail]", got)
+	}
+}
+
+// TestNextAfterAll_ConditionPriorityOrder (PRD Q5): when multiple conditions
+// match, the highest-priority (lowest number) wins.
+func TestNextAfterAll_ConditionPriorityOrder(t *testing.T) {
+	t.Parallel()
+	truthy := jsonRaw(t, `{"==":[1,1]}`)
+	snap := &Snapshot{
+		Nodes: []SnapshotNode{{NodeKey: "root"}, {NodeKey: "p1"}, {NodeKey: "p2"}},
+		Edges: []SnapshotEdge{
+			{FromNodeKey: "root", ToNodeKey: "p2", Priority: 2, Condition: truthy},
+			{FromNodeKey: "root", ToNodeKey: "p1", Priority: 1, Condition: truthy},
+		},
+	}
+	got := snap.NextAfterAll("root", map[string]any{})
+	if len(got) != 1 || got[0].NodeKey != "p1" {
+		t.Fatalf("both conditions match → priority 1 wins; got %+v, want [p1]", got)
+	}
+}
+
+// TestNextAfterAll_CatchAllFallback (PRD AC6): when no condition matches, the
+// condition=nil catch-all edge is selected.
+func TestNextAfterAll_CatchAllFallback(t *testing.T) {
+	t.Parallel()
+	never := jsonRaw(t, `{"==":[1,2]}`)
+	snap := &Snapshot{
+		Nodes: []SnapshotNode{{NodeKey: "decide"}, {NodeKey: "branchA"}, {NodeKey: "default"}},
+		Edges: []SnapshotEdge{
+			{FromNodeKey: "decide", ToNodeKey: "branchA", Priority: 1, Condition: never},
+			{FromNodeKey: "decide", ToNodeKey: "default", Priority: 2}, // catch-all
+		},
+	}
+	got := snap.NextAfterAll("decide", map[string]any{})
+	if len(got) != 1 || got[0].NodeKey != "default" {
+		t.Fatalf("no condition matched → catch-all default; got %+v, want [default]", got)
+	}
+}
+
+// TestNextAfterAll_NoMatchNoCatchAll (PRD AC7): when no condition matches and
+// there is no catch-all, NextAfterAll returns an empty slice (callsite treats
+// this as run blocked).
+func TestNextAfterAll_NoMatchNoCatchAll(t *testing.T) {
+	t.Parallel()
+	never := jsonRaw(t, `{"==":[1,2]}`)
+	snap := &Snapshot{
+		Nodes: []SnapshotNode{{NodeKey: "decide"}, {NodeKey: "branchA"}},
+		Edges: []SnapshotEdge{
+			{FromNodeKey: "decide", ToNodeKey: "branchA", Priority: 1, Condition: never},
+		},
+	}
+	got := snap.NextAfterAll("decide", map[string]any{})
+	if len(got) != 0 {
+		t.Fatalf("no match + no catch-all → empty; got %+v", got)
+	}
+}
+
+// TestNextAfterAll_VarMissingFallsThrough (PRD R5): var reference against
+// missing data evaluates to nil → condition does not match → catch-all path.
+func TestNextAfterAll_VarMissingFallsThrough(t *testing.T) {
+	t.Parallel()
+	// References verdict.result but evalCtx has no verdict namespace.
+	cond := jsonRaw(t, `{"==":[{"var":"verdict.result"},"pass"]}`)
+	snap := &Snapshot{
+		Nodes: []SnapshotNode{{NodeKey: "decide"}, {NodeKey: "branchA"}, {NodeKey: "default"}},
+		Edges: []SnapshotEdge{
+			{FromNodeKey: "decide", ToNodeKey: "branchA", Priority: 1, Condition: cond},
+			{FromNodeKey: "decide", ToNodeKey: "default", Priority: 2},
+		},
+	}
+	// Empty map: runtime mode, but verdict namespace absent.
+	got := snap.NextAfterAll("decide", map[string]any{})
+	if len(got) != 1 || got[0].NodeKey != "default" {
+		t.Fatalf("missing var → catch-all default; got %+v", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// validateEdgeConditions (P1-2 Wave 2 publish-time validation)
+// ---------------------------------------------------------------------------
+
+func TestValidateEdgeConditions_AcceptsAgentWithConditions(t *testing.T) {
+	t.Parallel()
+	nodes := []NodeInput{
+		{NodeKey: "agent", Type: NodeTypeAgent, Name: "A", Config: []byte(`{"agent_selector":"x"}`)},
+		{NodeKey: "end", Type: NodeTypeEnd, Name: "End"},
+	}
+	edges := []EdgeInput{
+		{FromNodeKey: "agent", ToNodeKey: "end", Priority: 1,
+			Condition: jsonRaw(t, `{"==":[{"var":"verdict.result"},"pass"]}`)},
+	}
+	if err := validateEdgeConditions(nodes, edges); err != nil {
+		t.Fatalf("agent edge with valid condition must PASS: %v", err)
+	}
+}
+
+func TestValidateEdgeConditions_RejectsConditionOnNonAgent(t *testing.T) {
+	t.Parallel()
+	nodes := []NodeInput{
+		{NodeKey: "accept", Type: NodeTypeAcceptance, Name: "A"},
+		{NodeKey: "end", Type: NodeTypeEnd, Name: "End"},
+	}
+	edges := []EdgeInput{
+		{FromNodeKey: "accept", ToNodeKey: "end", Priority: 1,
+			Condition: jsonRaw(t, `{"==":[1,1]}`)},
+	}
+	err := validateEdgeConditions(nodes, edges)
+	if err == nil || !strings.Contains(err.Error(), "only agent edges may") {
+		t.Fatalf("non-agent edge with condition = %v, want agent-only rejection", err)
+	}
+}
+
+func TestValidateEdgeConditions_RejectsInvalidJSONLogic(t *testing.T) {
+	t.Parallel()
+	nodes := []NodeInput{
+		{NodeKey: "agent", Type: NodeTypeAgent, Name: "A", Config: []byte(`{"agent_selector":"x"}`)},
+		{NodeKey: "end", Type: NodeTypeEnd, Name: "End"},
+	}
+	edges := []EdgeInput{
+		{FromNodeKey: "agent", ToNodeKey: "end", Priority: 1,
+			Condition: jsonRaw(t, `{"unknown_op":[1,1]}`)},
+	}
+	err := validateEdgeConditions(nodes, edges)
+	if err == nil || !strings.Contains(err.Error(), "condition invalid") {
+		t.Fatalf("invalid JSONLogic = %v, want schema rejection", err)
+	}
+}
+
+// TestValidateEdgeConditions_RejectsMultipleCatchAllOnAgent (AC10): an agent
+// node with two condition=nil edges is ambiguous routing → publish 422.
+func TestValidateEdgeConditions_RejectsMultipleCatchAllOnAgent(t *testing.T) {
+	t.Parallel()
+	nodes := []NodeInput{
+		{NodeKey: "agent", Type: NodeTypeAgent, Name: "A", Config: []byte(`{"agent_selector":"x"}`)},
+		{NodeKey: "end1", Type: NodeTypeEnd, Name: "End1"},
+		{NodeKey: "end2", Type: NodeTypeEnd, Name: "End2"},
+	}
+	edges := []EdgeInput{
+		{FromNodeKey: "agent", ToNodeKey: "end1", Priority: 1},
+		{FromNodeKey: "agent", ToNodeKey: "end2", Priority: 2},
+	}
+	err := validateEdgeConditions(nodes, edges)
+	if err == nil || !strings.Contains(err.Error(), "catch-all") {
+		t.Fatalf("two catch-all edges on agent = %v, want AC10 rejection", err)
+	}
+}
+
+// TestValidateEdgeConditions_FanOutMultiEdgeNotCatchAll (AC10 scoping): a
+// fan_out node may have multiple condition=nil edges — fan_out's branching
+// semantics are structural (P1-1), not conditional routing. AC10 applies
+// only to agent nodes.
+func TestValidateEdgeConditions_FanOutMultiEdgeNotCatchAll(t *testing.T) {
+	t.Parallel()
+	nodes := []NodeInput{
+		{NodeKey: "fan", Type: NodeTypeFanOut, Name: "F", Config: []byte(`{"items_field":"x"}`)},
+		{NodeKey: "b1", Type: NodeTypeAgent, Name: "B1", Config: []byte(`{"agent_selector":"x"}`)},
+		{NodeKey: "b2", Type: NodeTypeAgent, Name: "B2", Config: []byte(`{"agent_selector":"y"}`)},
+	}
+	edges := []EdgeInput{
+		{FromNodeKey: "fan", ToNodeKey: "b1", Priority: 1},
+		{FromNodeKey: "fan", ToNodeKey: "b2", Priority: 2},
+	}
+	if err := validateEdgeConditions(nodes, edges); err != nil {
+		t.Fatalf("fan_out multi-edge must NOT trigger AC10 (not conditional routing): %v", err)
 	}
 }
 
@@ -411,8 +601,10 @@ func TestDAGLinearEquivalence_StandardSeed(t *testing.T) {
 	snap := linearSnapshot(t, chain)
 
 	// Every mid-chain node returns a 1-element slice; the tail returns 0.
+	// P1-2: nil evalCtx = topology mode; without conditions the return
+	// shape (≤1 element) matches the P0 invariant exactly.
 	for i, key := range chain {
-		got := snap.NextAfterAll(key)
+		got := snap.NextAfterAll(key, nil)
 		if i < len(chain)-1 {
 			if len(got) != 1 || got[0].NodeKey != chain[i+1] {
 				t.Fatalf("NextAfterAll(%q) = %+v, want [%q]", key, got, chain[i+1])
@@ -444,7 +636,7 @@ func TestDAGLinearEquivalence_BugfixSeed(t *testing.T) {
 	snap := linearSnapshot(t, chain)
 
 	for i, key := range chain {
-		got := snap.NextAfterAll(key)
+		got := snap.NextAfterAll(key, nil)
 		if i < len(chain)-1 {
 			if len(got) != 1 || got[0].NodeKey != chain[i+1] {
 				t.Fatalf("NextAfterAll(%q) = %+v, want [%q]", key, got, chain[i+1])

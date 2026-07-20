@@ -76,12 +76,18 @@ var ErrFanOutMultiEdge = errors.New("workflow: P1-1 only supports single-edge fa
 // unresolved agent, unknown label) aborts the whole expansion and
 // surfaces as failActivation → step blocked + run paused.
 func (e *Engine) activateFanOutNode(ctx context.Context, run db.WorkflowRun, snap *Snapshot, node *SnapshotNode, step db.StepInstance) error {
-	// P1-1 scope guard: single-edge only.
-	downstreams := snap.NextAfterAll(node.NodeKey)
-	if len(downstreams) != 1 {
+	// P1-1 scope guard: single-edge only. P1-2 note: count raw edges via
+	// OutEdgeCount because NextAfterAll now returns ≤1 element regardless
+	// of how many edges exist (it makes the routing decision, not a
+	// structural count). fan_out edges are catch-all per R7 (no condition
+	// evaluation); nil evalCtx below is the honest choice for the
+	// structural single-branch lookup.
+	edgeCount := snap.OutEdgeCount(node.NodeKey)
+	if edgeCount != 1 {
 		return e.failActivation(ctx, run, step, fmt.Errorf("%w: fan_out %q has %d downstream edges",
-			ErrFanOutMultiEdge, node.NodeKey, len(downstreams)))
+			ErrFanOutMultiEdge, node.NodeKey, edgeCount))
 	}
+	downstreams := snap.NextAfterAll(node.NodeKey, nil)
 	branchNode := downstreams[0]
 	if branchNode.Type != NodeTypeAgent {
 		return e.failActivation(ctx, run, step, fmt.Errorf(
@@ -425,26 +431,34 @@ func (e *Engine) fanOutDispatch(
 }
 
 // firstConvergeDownstream locates the first converge-typed node
-// reachable downstream from node via NextAfterAll (BFS). fan_out →
-// branch → converge is the P1-1 shape; this works for any branch
-// chain that eventually hits a converge. Returns nil if none found
-// (the publish-time pairing check should prevent that, but a
-// hand-edited snapshot could still miss it).
+// reachable downstream from node via raw-edge BFS (NOT NextAfterAll, which
+// returns ≤1 element and would silently drop fan_out siblings). fan_out →
+// branch → converge is the P1-1 shape; this works for any branch chain
+// that eventually hits a converge. Returns nil if none found (the
+// publish-time pairing check should prevent that, but a hand-edited
+// snapshot could still miss it).
 func firstConvergeDownstream(snap *Snapshot, node *SnapshotNode) *SnapshotNode {
 	visited := map[string]bool{node.NodeKey: true}
 	queue := []string{node.NodeKey}
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
-		for _, nxt := range snap.NextAfterAll(cur) {
-			if visited[nxt.NodeKey] {
+		for _, e := range snap.Edges {
+			if e.FromNodeKey != cur {
 				continue
 			}
-			visited[nxt.NodeKey] = true
-			if nxt.Type == NodeTypeConverge {
-				return &nxt
+			if visited[e.ToNodeKey] {
+				continue
 			}
-			queue = append(queue, nxt.NodeKey)
+			visited[e.ToNodeKey] = true
+			n := snap.NodeByKey(e.ToNodeKey)
+			if n == nil {
+				continue
+			}
+			if n.Type == NodeTypeConverge {
+				return n
+			}
+			queue = append(queue, e.ToNodeKey)
 		}
 	}
 	return nil

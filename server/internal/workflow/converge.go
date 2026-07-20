@@ -279,7 +279,9 @@ func (e *Engine) handleChildStepTerminal(ctx context.Context, qtx *db.Queries, r
 			return eff, nil // lost guard race
 		}
 		// Activate the post-converge downstream (P0 single-edge after converge).
-		afterConverge := snapForFanOut.NextAfterAll(convergeNode.NodeKey)
+		// P1-2: converge edges are catch-all per R7; nil evalCtx = topology
+		// mode (every edge hits), which is what we want for a structural hop.
+		afterConverge := snapForFanOut.NextAfterAll(convergeNode.NodeKey, nil)
 		var downstreamNode *SnapshotNode
 		var downstreamStep *db.StepInstance
 		if len(afterConverge) > 0 {
