@@ -96,9 +96,9 @@ func (e *Engine) activateEndNode(ctx context.Context, run db.WorkflowRun, step d
 // with gate_type=adversarial. It signals buildHandoffNote to apply the
 // adversarial context whitelist (squad-briefing.md:158).
 func (e *Engine) activateAgentNode(ctx context.Context, run db.WorkflowRun, snap *Snapshot, node *SnapshotNode, step db.StepInstance, reworkCtx *ReworkContext, adversarial bool) error {
-	agentID, err := util.ParseUUID(node.Config.AgentID)
+	agentID, err := e.resolveAgentForNode(ctx, run, node)
 	if err != nil {
-		return e.failActivation(ctx, run, step, fmt.Errorf("node %q has no frozen agent_id (republish the template)", node.NodeKey))
+		return e.failActivation(ctx, run, step, err)
 	}
 
 	intakeNumber := int64(0)
