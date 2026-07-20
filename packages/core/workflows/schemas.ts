@@ -91,6 +91,13 @@ export const WorkflowTemplateEdgeSchema = z
     from_node_key: z.string(),
     to_node_key: z.string(),
     priority: z.number().optional().default(0),
+    // P1-2 conditional routing: JSONLogic expression evaluated against the
+    // {verdict, exit_fields, run.context} namespace at runtime. undefined =
+    // catch-all (matches every verdict). The frontend does not evaluate
+    // conditions; it only carries the blob through to the API. Kept as
+    // z.unknown() (not z.object()) so a hand-edited or forward-compat blob
+    // survives parseWithFallback under protocol rule D-9.
+    condition: z.unknown().optional(),
   })
   .loose();
 
@@ -274,6 +281,11 @@ export const WorkflowTemplateSnapshotSchema = z
             from_node_key: z.string(),
             to_node_key: z.string(),
             priority: z.number().optional().default(0),
+            // P1-2: present when the frozen edge carries a JSONLogic
+            // condition; absent for catch-all edges. Kept as z.unknown()
+            // (D-9 forward compat) — the engine has already evaluated
+            // this server-side; the client only displays/transports it.
+            condition: z.unknown().optional(),
           })
           .loose(),
       )

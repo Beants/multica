@@ -99,6 +99,11 @@ export interface WorkflowTemplateEdge {
   from_node_key: string;
   to_node_key: string;
   priority: number;
+  // P1-2 conditional routing: JSONLogic expression (or undefined for a
+  // catch-all edge). The frontend treats this as an opaque JSON blob — the
+  // engine evaluates it; the UI only carries/transports it (MVP: API-only
+  // configuration; visual builder lands in P3).
+  condition?: unknown;
 }
 
 export interface WorkflowTemplateDetail extends WorkflowTemplate {
@@ -120,6 +125,12 @@ export interface WorkflowEdgeInput {
   from_node_key: string;
   to_node_key: string;
   priority?: number;
+  // P1-2 conditional routing: JSONLogic expression. Omitted/undefined =
+  // catch-all. The HTTP transport (workflowEdgeInput in
+  // server/internal/handler/workflow_template.go) does not yet parse this
+  // field; P3 will wire it through. Programmatic clients publishing via the
+  // service layer can already set it.
+  condition?: unknown;
 }
 
 export interface CreateWorkflowTemplateRequest {
@@ -252,6 +263,10 @@ export interface WorkflowTemplateSnapshot {
     from_node_key: string;
     to_node_key: string;
     priority: number;
+    // P1-2: present when this edge carries a JSONLogic condition; absent
+    // for catch-all edges. Forwarded untouched for display/debugging —
+    // the engine has already evaluated it server-side.
+    condition?: unknown;
   }[];
 }
 

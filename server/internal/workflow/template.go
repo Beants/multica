@@ -335,6 +335,47 @@ func (s *Snapshot) OutEdgeCount(nodeKey string) int {
 	return n
 }
 
+// NextConditionalMatch returns the first outgoing edge from nodeKey whose
+// Condition is non-nil AND matches evalCtx. Catch-all edges
+// (Condition == nil) are intentionally skipped — VerdictFail's
+// conditional-routing arm (engine.go consumeVerdictTx) uses this so that
+// fail-verdict routing fires only on an explicit `verdict.result=="fail"`
+// style condition; a catch-all on a fail verdict must fall through to the
+// P0 retry/escalate path (P0/P1-1 back-compat: catch-all-only agents
+// retry rather than silently advancing on failure).
+//
+// Sort order matches NextAfterAll: priority ASC, then ToNodeKey ASC. Returns
+// nil when no explicit conditional edge matches.
+func (s *Snapshot) NextConditionalMatch(nodeKey string, evalCtx map[string]any) *SnapshotNode {
+	type cand struct {
+		idx      int
+		priority int32
+		toKey    string
+	}
+	var cands []cand
+	for i, e := range s.Edges {
+		if e.FromNodeKey != nodeKey || len(e.Condition) == 0 {
+			continue
+		}
+		if edgeConditionMatches(e.Condition, evalCtx) {
+			cands = append(cands, cand{idx: i, priority: e.Priority, toKey: e.ToNodeKey})
+		}
+	}
+	if len(cands) == 0 {
+		return nil
+	}
+	sort.Slice(cands, func(i, j int) bool {
+		if cands[i].priority != cands[j].priority {
+			return cands[i].priority < cands[j].priority
+		}
+		return cands[i].toKey < cands[j].toKey
+	})
+	if n := s.NodeByKey(s.Edges[cands[0].idx].ToNodeKey); n != nil {
+		return n
+	}
+	return nil
+}
+
 // DownstreamNodeKeys returns every transitive descendant of nodeKey in the
 // DAG (exclusive of nodeKey itself), discovered by BFS over the raw edge
 // list. The visited map makes the walk cycle-safe even when the graph is
