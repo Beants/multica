@@ -100,6 +100,22 @@ func registerWorkflowRoutes(r chi.Router, h *handler.Handler, authMW func(http.H
 				r.Post("/acceptance/reject", wrh.RejectAcceptance)
 			})
 		})
+
+		// P1-4 Rules asset CRUD (design.md §2 支柱 5). Operator surface —
+		// every route sits behind RequireHumanActor (team governance, not
+		// agent self-service).
+		ruleH := handler.NewWorkflowRuleHandler(h.Queries)
+		r.Route("/api/workflow-rules", func(r chi.Router) {
+			r.Use(handler.RequireHumanActor)
+			r.Post("/", ruleH.CreateRule)
+			r.Get("/", ruleH.ListRules)
+			r.Route("/{id}", func(r chi.Router) {
+				r.Delete("/", ruleH.DeleteRule)
+				r.Post("/bindings", ruleH.CreateBinding)
+				r.Get("/bindings", ruleH.ListBindings)
+				r.Delete("/bindings/{bindingId}", ruleH.DeleteBinding)
+			})
+		})
 	})
 }
 
