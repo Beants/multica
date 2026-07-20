@@ -75,9 +75,11 @@ func TestValidateTemplateGraph(t *testing.T) {
 			wantErr: "unknown node",
 		},
 		{
-			name:    "gate type rejected",
+			// P1-3: gate is now a supported type; a gate node without
+			// gate_type surfaces the config error from validateGateConfig.
+			name:    "gate type without gate_type",
 			nodes:   []NodeInput{typedNode("g", "gate", NodeConfig{})},
-			wantErr: "unsupported type",
+			wantErr: "requires gate_type",
 		},
 	}
 	for _, tt := range tests {

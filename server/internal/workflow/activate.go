@@ -33,6 +33,10 @@ import (
 //     and waits for the upstream fan_out's children to reach terminal
 //     outcomes; convergence fires from handleChildStepTerminal in
 //     consumeVerdictTx. See converge.go.
+//   - gate:       synchronous script gate (P1-3 MVP). Server-side script
+//     execution under a double-transaction boundary; transitions itself
+//     to passed/blocked and reuses runSignalAction for post-commit
+//     downstream advance. See gate.go.
 
 // activateNode dispatches one already-active step by node type.
 // reworkCtx is non-nil only on rework rounds (D-8 explicit injection).
@@ -48,6 +52,8 @@ func (e *Engine) activateNode(ctx context.Context, run db.WorkflowRun, snap *Sna
 		return e.activateFanOutNode(ctx, run, snap, node, step)
 	case NodeTypeConverge:
 		return e.activateConvergeNode(ctx, run, snap, node, step)
+	case NodeTypeGate:
+		return e.activateGateNode(ctx, run, snap, node, step)
 	default:
 		return fmt.Errorf("workflow: unsupported P0 node type %q", node.Type)
 	}

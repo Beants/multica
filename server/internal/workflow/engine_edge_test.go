@@ -1062,7 +1062,10 @@ func TestActivateNodeUnsupportedType(t *testing.T) {
 	run := f.startRun(tmpl, "ext-badtype", "Unsupported node type")
 	ctx := context.Background()
 
-	// Rewrite the second node's snapshot type to a P1-only type.
+	// Rewrite the second node's snapshot type to a type the activator has
+	// no case for. (P1-3 made `gate` a dispatched type — earlier this test
+	// used "gate" as the stand-in unsupported type; with gate now routed,
+	// a hand-edited bogus name is the only way to reach the default arm.)
 	var snapRaw []byte
 	if err := f.pool.QueryRow(ctx, `SELECT template_snapshot FROM workflow_run WHERE id = $1`, run.ID).Scan(&snapRaw); err != nil {
 		t.Fatalf("read snapshot: %v", err)
@@ -1073,7 +1076,7 @@ func TestActivateNodeUnsupportedType(t *testing.T) {
 	}
 	for i := range snap.Nodes {
 		if snap.Nodes[i].NodeKey == "work" {
-			snap.Nodes[i].Type = "gate"
+			snap.Nodes[i].Type = "bogus_node_type"
 		}
 	}
 	patched, err := json.Marshal(snap)
