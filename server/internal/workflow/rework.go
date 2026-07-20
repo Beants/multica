@@ -249,7 +249,7 @@ func (e *Engine) assembleReworkContext(ctx context.Context, runID pgtype.UUID, t
 // Instructions, upstream exit_fields, and rework context are skipped so the
 // reviewer cannot lean on the builder's framing — it must derive its
 // verdict from the diff/test cases the daemon exposes via the workdir.
-func (e *Engine) buildHandoffNote(ctx context.Context, run db.WorkflowRun, snap *Snapshot, node *SnapshotNode, step db.StepInstance, rc *ReworkContext, adversarial bool) string {
+func (e *Engine) buildHandoffNote(ctx context.Context, run db.WorkflowRun, snap *Snapshot, node *SnapshotNode, step db.StepInstance, rc *ReworkContext, adversarial bool, agentID pgtype.UUID) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[workflow node] %s (%s) — attempt %d\n", sanitizePromptText(node.Name), node.NodeKey, step.Attempt)
 
@@ -270,6 +270,22 @@ func (e *Engine) buildHandoffNote(ctx context.Context, run db.WorkflowRun, snap 
 	}
 	fmt.Fprintf(&b, "[instructions] %s\n", instructions)
 
+	// P1-4: inject soft context_inject rules bound to the dispatching agent
+	// (team conventions the agent should honor). Best-effort — a lookup
+	// failure never blocks dispatch; the note just omits the section.
+	// Skipped for adversarial (that path returns early above with its strict
+	// identity+schema whitelist).
+	if agentID.Valid {
+		if rules, err := e.Queries.ListSoftRulesForAgent(ctx, db.ListSoftRulesForAgentParams{
+			WorkspaceID: run.WorkspaceID,
+			TargetID:    agentID,
+		}); err == nil {
+			if rendered := renderSoftRules(rules); rendered != "" {
+				fmt.Fprintf(&b, "[team rules] %s\n", rendered)
+			}
+		}
+	}
+
 	if up := upstreamNodeOf(snap, node.NodeKey); up != nil {
 		if fields := e.passedExitFields(ctx, step.RunID, up.NodeKey); len(fields) > 0 {
 			fmt.Fprintf(&b, "[upstream exit_fields from %s] %s\n", up.NodeKey, compactJSON(fields, 1024))
@@ -286,6 +302,17 @@ func (e *Engine) buildHandoffNote(ctx context.Context, run db.WorkflowRun, snap 
 
 	b.WriteString("Full node context: `multica step context`.")
 	return finalizeHandoffNote(b.String())
+}
+
+// renderSoftRules flattens the soft context_inject rules bound to the agent
+// into one sanitized line for the handoff note: "name: content; ...".
+// Empty rules → "" (caller omits the [team rules] section).
+func renderSoftRules(rules []db.WorkflowRule) string {
+	var b strings.Builder
+	for _, r := range rules {
+		fmt.Fprintf(&b, "%s: %s; ", sanitizePromptText(r.Name), sanitizePromptText(r.Content))
+	}
+	return strings.TrimSuffix(b.String(), "; ")
 }
 
 // renderReworkContext flattens the rework context into one sanitized line.

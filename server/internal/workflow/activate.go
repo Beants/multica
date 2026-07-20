@@ -112,7 +112,7 @@ func (e *Engine) activateAgentNode(ctx context.Context, run db.WorkflowRun, snap
 	// title guard (design.md §4.1).
 	title := fmt.Sprintf("%d-%s-attempt%d", intakeNumber, node.NodeKey, step.Attempt)
 
-	note := e.buildHandoffNote(ctx, run, snap, node, step, reworkCtx, adversarial)
+	note := e.buildHandoffNote(ctx, run, snap, node, step, reworkCtx, adversarial, agentID)
 
 	// initiator stays raw for attribution (invalid => owner_fallback /
 	// fail-closed per MUL-4302); creator is coerced to the zero-UUID

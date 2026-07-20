@@ -1164,6 +1164,29 @@ type WorkflowNode struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type WorkflowRule struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Level       string             `json:"level"`
+	Scope       string             `json:"scope"`
+	Content     string             `json:"content"`
+	Config      []byte             `json:"config"`
+	Status      string             `json:"status"`
+	Version     int32              `json:"version"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkflowRuleBinding struct {
+	ID          pgtype.UUID        `json:"id"`
+	RuleID      pgtype.UUID        `json:"rule_id"`
+	TargetType  string             `json:"target_type"`
+	TargetID    pgtype.UUID        `json:"target_id"`
+	Enforcement string             `json:"enforcement"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type WorkflowRun struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`

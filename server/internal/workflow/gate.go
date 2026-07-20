@@ -36,6 +36,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -426,6 +427,22 @@ func (e *Engine) executeScript(ctx context.Context, script string, language stri
 		cmd = exec.CommandContext(ctx, "sh", "-c", script)
 	}
 	cmd.Env = allowlistEnv()
+	// Isolate the script (shell + any children it spawns, e.g. `sleep`)
+	// into its own process group so a ctx-cancel kills the whole group.
+	// Without Setpgid + group-kill, CommandContext kills only the shell —
+	// the orphaned child keeps the stdout/stderr pipe open, cmd.Run blocks
+	// until it exits on its own, and the timeout deadline reads as
+	// status=running on slow CI runners (root cause of the persistent
+	// TestAC7ScriptGateTimeout flake; Setpgid + negative-pid SIGKILL
+	// reaches the whole group so the script actually dies at the deadline).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return os.ErrProcessDone
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 2 * time.Second
 	// cmd.Dir intentionally unset (inherits server cwd). Workdir
 	// association (step.issue_id workdir) lands in v2 alongside the
 	// daemon-execution refactor.
