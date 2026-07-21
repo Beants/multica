@@ -227,5 +227,33 @@
     "token_title": "훅이 생성되었습니다",
     "token_hint": "지금 이 토큰을 복사하세요 — 한 번만 표시됩니다. POST /api/hooks/workflow/{token} 형태로 전송합니다.",
     "endpoint_hint": "외부 시스템에서 이 URL로 POST 하세요:"
+  },
+  "rules": {
+    "title": "규칙",
+    "subtitle": "팀 제약: 소프트 규칙은 에이전트 컨텍스트에 주입되고, 하드 규칙은 게이트에서 강제됩니다. 노드/에이전트 바인딩은 후속 버전에서 제공됩니다.",
+    "new_rule": "새 규칙",
+    "name_placeholder": "이름 (예: PR에 테스트 커버리지 포함 필수)",
+    "content_placeholder": "규칙 내용 — 에이전트에게 표시되는 제약 텍스트(소프트) 또는 게이트 검사 항목(하드)",
+    "add_rule": "규칙 추가",
+    "create_error": "규칙을 만들지 못했습니다.",
+    "rule_count_other": "규칙 {{count}}개",
+    "delete": "삭제",
+    "scope_label": "범위: {{scope}}",
+    "empty": "아직 규칙이 없습니다 — 위에서 만드세요.",
+    "unavailable": "워크플로 엔진이 꺼져 있어 규칙을 사용할 수 없습니다.",
+    "level": {
+      "soft": "소프트",
+      "hard": "하드",
+      "safety": "세이프티"
+    }
+  },
+  "dashboard": {
+    "unavailable": "워크플로 엔진이 꺼져 있습니다.",
+    "title": "워크플로 관측성",
+    "event_distribution": "이벤트 분포",
+    "no_events_yet": "아직 이벤트가 없습니다.",
+    "recent_events": "최근 이벤트 ({{count}})",
+    "by_actor": "{{actor}} 님이",
+    "no_events": "이벤트가 없습니다."
   }
 }

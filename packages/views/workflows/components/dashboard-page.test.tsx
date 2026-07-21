@@ -1,8 +1,11 @@
 // dashboard-page.test.tsx — P2-4 AC5: mock metrics + events → render.
 
+import type { ReactNode } from "react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { I18nProvider } from "@multica/core/i18n/react";
+import { RESOURCES } from "../../locales";
 
 const apiMock = vi.hoisted(() => ({
   listWorkflowMetrics: vi.fn(),
@@ -15,11 +18,21 @@ vi.mock("@multica/core/workflows/flag", () => ({ useWorkflowEngineFlag: () => tr
 
 import { DashboardPage } from "./dashboard-page";
 
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" resources={RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
+
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <DashboardPage />
+      <I18nWrapper>
+        <DashboardPage />
+      </I18nWrapper>
     </QueryClientProvider>,
   );
 }

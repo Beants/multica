@@ -227,5 +227,33 @@
     "token_title": "フックを作成しました",
     "token_hint": "このトークンを今すぐコピーしてください — 一度しか表示されません。POST /api/hooks/workflow/{token} として送信します。",
     "endpoint_hint": "外部システムからこの URL に POST してください:"
+  },
+  "rules": {
+    "title": "ルール",
+    "subtitle": "チーム制約: ソフトルールはエージェントのコンテキストに注入され、ハードルールはゲートで強制されます。ノード/エージェントへのバインドは後続バージョンで提供予定です。",
+    "new_rule": "新規ルール",
+    "name_placeholder": "名前（例: PR にテストカバレッジを必須にする）",
+    "content_placeholder": "ルール内容 — エージェントに表示される制約テキスト（ソフト）またはゲートチェック項目（ハード）",
+    "add_rule": "ルールを追加",
+    "create_error": "ルールの作成に失敗しました。",
+    "rule_count_other": "{{count}} 件のルール",
+    "delete": "削除",
+    "scope_label": "スコープ: {{scope}}",
+    "empty": "ルールがまだありません — 上で作成してください。",
+    "unavailable": "ワークフローエンジンがオフのため、ルールは利用できません。",
+    "level": {
+      "soft": "ソフト",
+      "hard": "ハード",
+      "safety": "セーフティ"
+    }
+  },
+  "dashboard": {
+    "unavailable": "ワークフローエンジンがオフです。",
+    "title": "ワークフロー可観測性",
+    "event_distribution": "イベント分布",
+    "no_events_yet": "イベントがまだありません。",
+    "recent_events": "最近のイベント ({{count}})",
+    "by_actor": "{{actor}} による",
+    "no_events": "イベントがありません。"
   }
 }

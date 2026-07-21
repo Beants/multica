@@ -1,7 +1,6 @@
-/* eslint-disable i18next/no-literal-string */
 // dashboard-page.tsx — P2-4 workflow observability. MVP: scene-layer event
 // distribution (bar) + recent events feed. Consumes P2-1 (events) + P2-3
-// (metrics) APIs. Hardcoded English (i18n bundled across fe/P2 later).
+// (metrics) APIs.
 
 import { useQuery } from "@tanstack/react-query";
 
@@ -10,15 +9,21 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkflowEngineFlag } from "@multica/core/workflows/flag";
 
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { useT } from "../../i18n";
 
 export function DashboardPage() {
+  const { t } = useT("workflows");
   const wsId = useWorkspaceId();
   const enabled = useWorkflowEngineFlag();
   const metricsQ = useQuery({ ...workflowMetricsOptions(wsId), enabled });
   const eventsQ = useQuery({ ...workflowEventsOptions(wsId), enabled });
 
   if (!enabled) {
-    return <div className="p-5 text-sm text-muted-foreground">Workflow engine is off.</div>;
+    return (
+      <div className="p-5 text-sm text-muted-foreground">
+        {t(($) => $.dashboard.unavailable)}
+      </div>
+    );
   }
 
   const metrics = metricsQ.data ?? [];
@@ -27,14 +32,14 @@ export function DashboardPage() {
 
   return (
     <div className="flex h-full flex-col gap-4 overflow-auto p-5">
-      <h1 className="text-lg font-semibold">Workflow observability</h1>
+      <h1 className="text-lg font-semibold">{t(($) => $.dashboard.title)}</h1>
 
       <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium">Event distribution</h2>
+        <h2 className="text-sm font-medium">{t(($) => $.dashboard.event_distribution)}</h2>
         {metricsQ.isPending ? (
           <Skeleton className="h-8 w-full" />
         ) : metrics.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No events yet.</p>
+          <p className="text-xs text-muted-foreground">{t(($) => $.dashboard.no_events_yet)}</p>
         ) : (
           metrics.map((m) => (
             <div key={m.event_type} className="flex items-center gap-2 text-xs">
@@ -52,7 +57,9 @@ export function DashboardPage() {
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium">Recent events ({events.length})</h2>
+        <h2 className="text-sm font-medium">
+          {t(($) => $.dashboard.recent_events, { count: events.length })}
+        </h2>
         <div className="flex flex-col gap-1">
           {events.slice(0, 30).map((e) => (
             <div key={e.id} className="flex items-center gap-2 rounded-md border p-2 text-xs">
@@ -61,11 +68,15 @@ export function DashboardPage() {
               </span>
               <span className="font-medium">{e.event_type}</span>
               {e.actor_type && (
-                <span className="text-muted-foreground">by {e.actor_type}</span>
+                <span className="text-muted-foreground">
+                  {t(($) => $.dashboard.by_actor, { actor: e.actor_type })}
+                </span>
               )}
             </div>
           ))}
-          {events.length === 0 && <p className="text-xs text-muted-foreground">No events.</p>}
+          {events.length === 0 && (
+            <p className="text-xs text-muted-foreground">{t(($) => $.dashboard.no_events)}</p>
+          )}
         </div>
       </section>
     </div>

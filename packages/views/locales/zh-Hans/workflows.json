@@ -227,5 +227,33 @@
     "token_title": "Hook 已创建",
     "token_hint": "请立即复制此 token——它只显示一次。以 POST /api/hooks/workflow/{token} 调用。",
     "endpoint_hint": "从外部系统 POST 该地址："
+  },
+  "rules": {
+    "title": "规则",
+    "subtitle": "团队约束：软性规则注入 Agent 上下文，硬性规则在门禁处强制执行。节点/Agent 绑定将在后续版本开放。",
+    "new_rule": "新建规则",
+    "name_placeholder": "名称（例如：PR 必须包含测试覆盖）",
+    "content_placeholder": "规则内容——Agent 可见的约束文本（软性）或门禁检查项（硬性）",
+    "add_rule": "添加规则",
+    "create_error": "创建规则失败。",
+    "rule_count_other": "{{count}} 条规则",
+    "delete": "删除",
+    "scope_label": "作用域：{{scope}}",
+    "empty": "暂无规则——在上方创建第一条。",
+    "unavailable": "工作流引擎未开启——规则不可用。",
+    "level": {
+      "soft": "软性",
+      "hard": "硬性",
+      "safety": "安全"
+    }
+  },
+  "dashboard": {
+    "unavailable": "工作流引擎未开启。",
+    "title": "工作流可观测性",
+    "event_distribution": "事件分布",
+    "no_events_yet": "暂无事件。",
+    "recent_events": "最近事件（{{count}}）",
+    "by_actor": "来自 {{actor}}",
+    "no_events": "暂无事件。"
   }
 }

@@ -1,9 +1,12 @@
 // rule-list-page.test.tsx — P1-fe-2 AC5: rule CRUD flow (list render, create
 // mutation fired with the right payload, empty state).
 
+import type { ReactNode } from "react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { I18nProvider } from "@multica/core/i18n/react";
+import { RESOURCES } from "../../locales";
 
 const apiMock = vi.hoisted(() => ({
   listWorkflowRules: vi.fn(),
@@ -19,11 +22,21 @@ vi.mock("@multica/core/workflows/flag", () => ({
 
 import { RuleListPage } from "./rule-list-page";
 
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" resources={RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
+
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <RuleListPage />
+      <I18nWrapper>
+        <RuleListPage />
+      </I18nWrapper>
     </QueryClientProvider>,
   );
 }

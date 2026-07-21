@@ -227,5 +227,34 @@
     "token_title": "Hook created",
     "token_hint": "Copy this token now — it is shown only once. Send it as POST /api/hooks/workflow/{token}.",
     "endpoint_hint": "POST this URL from your external system:"
+  },
+  "rules": {
+    "title": "Rules",
+    "subtitle": "Team constraints injected into agent context (soft) or enforced at gates (hard). Bindings to nodes/agents land in a follow-up.",
+    "new_rule": "New rule",
+    "name_placeholder": "Name (e.g. PR must include test coverage)",
+    "content_placeholder": "Rule content — the constraint text agents see (soft) or gates check (hard)",
+    "add_rule": "Add rule",
+    "create_error": "Failed to create rule.",
+    "rule_count_one": "{{count}} rule",
+    "rule_count_other": "{{count}} rules",
+    "delete": "Delete",
+    "scope_label": "scope: {{scope}}",
+    "empty": "No rules yet — create one above.",
+    "unavailable": "Workflow engine is off — Rules are unavailable.",
+    "level": {
+      "soft": "soft",
+      "hard": "hard",
+      "safety": "safety"
+    }
+  },
+  "dashboard": {
+    "unavailable": "Workflow engine is off.",
+    "title": "Workflow observability",
+    "event_distribution": "Event distribution",
+    "no_events_yet": "No events yet.",
+    "recent_events": "Recent events ({{count}})",
+    "by_actor": "by {{actor}}",
+    "no_events": "No events."
   }
 }
