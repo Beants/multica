@@ -218,6 +218,23 @@ export interface CreateWorkflowRuleBindingRequest {
   enforcement?: WorkflowRuleEnforcement;
 }
 
+// P1-fe-3: agent capability labels (P1-7 dispatch matcher data). Managed via
+// /api/agents/{id}/capabilities; consumed by MatchAgentByCapability at dispatch.
+export interface AgentCapability {
+  id: string;
+  agent_id: string;
+  capability_key: string;
+  proficiency: number;
+  evidence?: unknown;
+  updated_at: string;
+  created_at: string;
+}
+
+export interface CreateAgentCapabilityRequest {
+  capability_key: string;
+  proficiency: number;
+}
+
 // ---------------------------------------------------------------------------
 // Runs (AC4 trace surface)
 // ---------------------------------------------------------------------------

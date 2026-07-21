@@ -1223,6 +1223,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// internal/handler/agent_env.go.
 					r.Get("/env", h.GetAgentEnv)
 					r.Put("/env", h.UpdateAgentEnv)
+						// P1-fe-3: capability labels (agent sub-resource, not flag-gated).
+						r.Get("/capabilities", h.GetAgentCapabilities)
+						r.Post("/capabilities", h.CreateAgentCapability)
+						r.Delete("/capabilities/{capId}", h.DeleteAgentCapability)
 				})
 			})
 

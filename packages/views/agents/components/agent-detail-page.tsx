@@ -59,6 +59,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { AgentPresenceIndicator } from "./agent-presence-indicator";
 import { VisibilityBadge } from "./visibility-badge";
 import { AgentOverviewPane, type DetailTab } from "./agent-overview-pane";
+import { CapabilityEditor } from "./capability-editor";
 import { useT, useTimeAgo } from "../../i18n";
 
 interface AgentDetailPageProps {
@@ -334,6 +335,12 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           onNavIntentHandled={() => setTabNavIntent(null)}
         />
       </div>
+
+      {canEdit.allowed && (
+        <div className="border-t px-6 py-4">
+          <CapabilityEditor agentId={agentId} />
+        </div>
+      )}
 
       {confirmArchive && (
         <Dialog

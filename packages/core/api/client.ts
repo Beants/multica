@@ -169,6 +169,8 @@ import type {
   WorkflowRuleBinding,
   CreateWorkflowRuleRequest,
   CreateWorkflowRuleBindingRequest,
+  AgentCapability,
+  CreateAgentCapabilityRequest,
   WorkflowTemplate,
   WorkflowTemplateDetail,
 } from "../workflows/types";
@@ -185,6 +187,8 @@ import {
   EMPTY_WORKFLOW_RULE_LIST,
   EMPTY_WORKFLOW_RULE_BINDING,
   EMPTY_WORKFLOW_RULE_BINDING_LIST,
+  EMPTY_AGENT_CAPABILITY,
+  EMPTY_AGENT_CAPABILITY_LIST,
   EMPTY_WORKFLOW_RUN_LIST,
   EMPTY_WORKFLOW_TEMPLATE,
   EMPTY_WORKFLOW_TEMPLATE_DETAIL,
@@ -197,6 +201,8 @@ import {
   WorkflowRuleListSchema,
   WorkflowRuleBindingSchema,
   WorkflowRuleBindingListSchema,
+  AgentCapabilitySchema,
+  AgentCapabilityListSchema,
   WorkflowRunListSchema,
   WorkflowTemplateDetailSchema,
   WorkflowTemplateListSchema,
@@ -2943,6 +2949,28 @@ export class ApiClient {
 
   async deleteWorkflowRuleBinding(ruleId: string, bindingId: string): Promise<void> {
     await this.fetch(`/api/workflow-rules/${ruleId}/bindings/${bindingId}`, { method: "DELETE" });
+  }
+
+  // P1-fe-3: agent capability labels (P1-7 dispatch matcher data).
+  async listAgentCapabilities(agentId: string): Promise<AgentCapability[]> {
+    const raw = await this.fetch<unknown>(`/api/agents/${agentId}/capabilities`);
+    return parseWithFallback(raw, AgentCapabilityListSchema, EMPTY_AGENT_CAPABILITY_LIST, {
+      endpoint: "GET /api/agents/:id/capabilities",
+    });
+  }
+
+  async createAgentCapability(agentId: string, data: CreateAgentCapabilityRequest): Promise<AgentCapability> {
+    const raw = await this.fetch<unknown>(`/api/agents/${agentId}/capabilities`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, AgentCapabilitySchema, EMPTY_AGENT_CAPABILITY, {
+      endpoint: "POST /api/agents/:id/capabilities",
+    });
+  }
+
+  async deleteAgentCapability(agentId: string, capId: string): Promise<void> {
+    await this.fetch(`/api/agents/${agentId}/capabilities/${capId}`, { method: "DELETE" });
   }
 
   async listWorkflowRuns(): Promise<WorkflowRun[]> {

@@ -13,6 +13,8 @@ export const workflowKeys = {
   diagnosis: (wsId: string, id: string) =>
     [...workflowKeys.run(wsId, id), "diagnosis"] as const,
   rules: (wsId: string) => [...workflowKeys.all(wsId), "rules"] as const,
+  agentCapabilities: (wsId: string, agentId: string) =>
+    [...workflowKeys.all(wsId), "agents", agentId, "capabilities"] as const,
 };
 
 export function workflowTemplateListOptions(wsId: string) {
@@ -63,5 +65,13 @@ export function workflowRuleListOptions(wsId: string) {
   return queryOptions({
     queryKey: workflowKeys.rules(wsId),
     queryFn: () => api.listWorkflowRules(),
+  });
+}
+
+// P1-fe-3: agent capability labels (P1-7 dispatch data).
+export function agentCapabilityListOptions(wsId: string, agentId: string) {
+  return queryOptions({
+    queryKey: workflowKeys.agentCapabilities(wsId, agentId),
+    queryFn: () => api.listAgentCapabilities(agentId),
   });
 }
