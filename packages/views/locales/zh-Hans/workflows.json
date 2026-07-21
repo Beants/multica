@@ -99,7 +99,10 @@
     "max_attempts_label": "最大尝试次数",
     "auto_pass_label": "全部裁定通过时自动验收",
     "not_found_title": "模板不存在",
-    "not_found_hint": "它可能已归档，或属于其他工作区。"
+    "not_found_hint": "它可能已归档，或属于其他工作区。",
+    "agent_selector_custom": "自定义：{{name}}",
+    "nonlinear_warning": "该模板的图是非线性的（存在分支、多个入口或条件边）。列表编辑器按链路顺序展示节点——保存将把图重写为线性链，并丢失所有边条件。",
+    "unsaved_changes": "有未保存的更改"
   },
   "runs": {
     "title": "工作流运行",

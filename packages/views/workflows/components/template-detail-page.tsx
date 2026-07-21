@@ -6,9 +6,9 @@
 // freezes the graph server-side; published/archived templates render
 // read-only (the server enforces the same rule with 409).
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, Archive, Plus, Workflow } from "lucide-react";
+import { AlertCircle, AlertTriangle, Archive, Plus, Workflow } from "lucide-react";
 import { toast } from "sonner";
 import { workflowTemplateDetailOptions } from "@multica/core/workflows/queries";
 import {
@@ -42,7 +42,7 @@ import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { CollectionPageState } from "../../layout/collection-page";
 import { useT } from "../../i18n";
 import { TemplateStatusBadge } from "./status-badges";
-import { NodeEditorCard, emptyNode, type EditableNode } from "./node-editor";
+import { NodeEditorCard, emptyNode, newExitField, type EditableNode } from "./node-editor";
 
 // Orders the node list by walking the edge chain from the head (the node
 // with no incoming edge). P0 chains are linear; a malformed/broken chain
@@ -68,6 +68,25 @@ function orderNodes(detail: WorkflowTemplateDetail) {
   return ordered.length === nodes.length ? ordered : nodes;
 }
 
+// True when the server graph is NOT the linear chain this form edits:
+// multiple heads, a branch (out-degree > 1), a cycle that swallows nodes,
+// or any conditional edge. Saving a non-linear graph from the list editor
+// would silently rewrite it as a linear chain — the banner warns first.
+function isNonLinearGraph(detail: WorkflowTemplateDetail): boolean {
+  const { nodes, edges } = detail;
+  if (nodes.length === 0) return false;
+  if (edges.some((e) => e.condition != null)) return true;
+  if (edges.length === 0) return nodes.length > 1;
+  const hasIncoming = new Set(edges.map((e) => e.to_node_key));
+  if (nodes.filter((n) => !hasIncoming.has(n.node_key)).length !== 1) return true;
+  const outDegree = new Map<string, number>();
+  for (const e of edges) outDegree.set(e.from_node_key, (outDegree.get(e.from_node_key) ?? 0) + 1);
+  if ([...outDegree.values()].some((d) => d > 1)) return true;
+  // A well-formed linear chain visits every node walking from the head.
+  const walked = orderNodes(detail);
+  return walked !== nodes && walked.length !== nodes.length;
+}
+
 function toEditable(detail: WorkflowTemplateDetail): EditableNode[] {
   return orderNodes(detail).map((n) => {
     const cfg = n.config ?? {};
@@ -81,6 +100,7 @@ function toEditable(detail: WorkflowTemplateDetail): EditableNode[] {
       max_attempts: cfg.max_attempts ?? 0,
       auto_pass: cfg.auto_pass === true,
       exit_fields: (cfg.exit_fields?.fields ?? []).map((f) => ({
+        ...newExitField(),
         name: f.name,
         type: f.type || "any",
         required: f.required === true,
@@ -111,8 +131,12 @@ function validateNodes(nodes: EditableNode[]): string | null {
     if (n.name.trim() === "") return `node "${n.node_key}" requires a name`;
     if (n.type === "agent" && n.agent_selector.trim() === "")
       return `node "${n.node_key}" requires an agent selector`;
+    const fieldNames = new Set<string>();
     for (const f of n.exit_fields) {
       if (f.name.trim() === "") return `node "${n.node_key}" has an exit field with an empty name`;
+      if (fieldNames.has(f.name.trim()))
+        return `node "${n.node_key}" has a duplicate exit field "${f.name.trim()}"`;
+      fieldNames.add(f.name.trim());
     }
   }
   return null;
@@ -191,7 +215,19 @@ function NodeSummary({ node, index }: { node: EditableNode; index: number }) {
   );
 }
 
-function TemplateEditor({ template }: { template: WorkflowTemplateDetail }) {
+// Stable structural snapshot for dirty detection — reference equality won't
+// do because every keystroke rebuilds the nodes array.
+function snapshotForm(name: string, description: string, nodes: EditableNode[]): string {
+  return JSON.stringify({ name, description, nodes });
+}
+
+function TemplateEditor({
+  template,
+  onDirtyChange,
+}: {
+  template: WorkflowTemplateDetail;
+  onDirtyChange: (dirty: boolean) => void;
+}) {
   const { t } = useT("workflows");
   const updateTemplate = useUpdateWorkflowTemplate();
   const publishTemplate = usePublishWorkflowTemplate();
@@ -199,6 +235,26 @@ function TemplateEditor({ template }: { template: WorkflowTemplateDetail }) {
   const [name, setName] = useState(template.name);
   const [description, setDescription] = useState(template.description);
   const [nodes, setNodes] = useState<EditableNode[]>(() => toEditable(template));
+
+  const baseline = useMemo(
+    () => snapshotForm(template.name, template.description, toEditable(template)),
+    [template],
+  );
+  const dirty = snapshotForm(name, description, nodes) !== baseline;
+
+  // Lift dirty state to the page header + warn on tab close. The remount
+  // key on <TemplateEditor> (id:updated_at) re-seeds the baseline after a
+  // save/publish refetch, which resets dirty automatically.
+  useEffect(() => {
+    onDirtyChange(dirty);
+    if (!dirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [dirty, onDirtyChange]);
 
   const patchNode = (index: number, next: EditableNode) =>
     setNodes((prev) => prev.map((n, i) => (i === index ? next : n)));
@@ -245,8 +301,19 @@ function TemplateEditor({ template }: { template: WorkflowTemplateDetail }) {
     });
   };
 
+  const nonLinear = isNonLinearGraph(template);
+
   return (
     <div className="flex flex-1 flex-col gap-4 overflow-auto p-5">
+      {nonLinear && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-lg border border-orange-500/40 bg-orange-500/10 p-3 text-xs text-orange-600 dark:text-orange-400"
+        >
+          <AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+          <p>{t(($) => $.detail.nonlinear_warning)}</p>
+        </div>
+      )}
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="wf-tpl-name">{t(($) => $.detail.name_label)}</Label>
         <Input id="wf-tpl-name" value={name} onChange={(e) => setName(e.target.value)} />
@@ -293,7 +360,7 @@ function TemplateEditor({ template }: { template: WorkflowTemplateDetail }) {
         <Button
           size="sm"
           onClick={save}
-          disabled={updateTemplate.isPending || name.trim() === ""}
+          disabled={updateTemplate.isPending || name.trim() === "" || !dirty}
         >
           {t(($) => $.detail.save)}
         </Button>
@@ -305,6 +372,11 @@ function TemplateEditor({ template }: { template: WorkflowTemplateDetail }) {
         >
           {t(($) => $.detail.publish)}
         </Button>
+        {dirty && (
+          <span className="text-xs text-muted-foreground">
+            {t(($) => $.detail.unsaved_changes)}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -340,6 +412,7 @@ export function TemplateDetailPage({ templateId }: { templateId: string }) {
   const p = useWorkspacePaths();
   const archiveTemplate = useArchiveWorkflowTemplate();
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [editorDirty, setEditorDirty] = useState(false);
   const detailQuery = useQuery({
     ...workflowTemplateDetailOptions(wsId, templateId),
     enabled,
@@ -399,6 +472,11 @@ export function TemplateDetailPage({ templateId }: { templateId: string }) {
             <span className="truncate">{template.name || t(($) => $.detail.unnamed_template)}</span>
             <TemplateStatusBadge status={template.status} />
             <span className="font-mono text-xs text-muted-foreground">{`v${template.version}`}</span>
+            {editorDirty && (
+              <span className="text-xs font-normal text-muted-foreground">
+                {t(($) => $.detail.unsaved_changes)}
+              </span>
+            )}
           </span>
         }
         actions={
@@ -416,7 +494,11 @@ export function TemplateDetailPage({ templateId }: { templateId: string }) {
       {readonly ? (
         <TemplateReadonly template={template} />
       ) : (
-        <TemplateEditor key={`${template.id}:${template.updated_at}`} template={template} />
+        <TemplateEditor
+          key={`${template.id}:${template.updated_at}`}
+          template={template}
+          onDirtyChange={setEditorDirty}
+        />
       )}
 
       <AlertDialog open={archiveOpen} onOpenChange={setArchiveOpen}>

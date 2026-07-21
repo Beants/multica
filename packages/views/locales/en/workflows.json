@@ -99,7 +99,10 @@
     "max_attempts_label": "Max attempts",
     "auto_pass_label": "Auto-pass when all verdicts pass",
     "not_found_title": "Template not found",
-    "not_found_hint": "It may have been archived or belongs to another workspace."
+    "not_found_hint": "It may have been archived or belongs to another workspace.",
+    "agent_selector_custom": "Custom: {{name}}",
+    "nonlinear_warning": "This template's graph is non-linear (branching, multiple heads, or conditional edges). The list editor shows nodes in chain order — saving will rewrite the graph as a linear chain and drop any edge conditions.",
+    "unsaved_changes": "Unsaved changes"
   },
   "runs": {
     "title": "Workflow runs",

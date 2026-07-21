@@ -6,6 +6,9 @@
 // schema inline; edges are derived from list order at save time (i → i+1).
 
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { agentListOptions } from "@multica/core/workspace/queries";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
@@ -22,10 +25,25 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useT } from "../../i18n";
 
 export interface EditableExitField {
+  /** Client-side row id — a stable React key so removing a middle row
+      doesn't shift DOM state onto its neighbours (index keys do). Never
+      serialised into the save payload. */
+  rowId: string;
   name: string;
   type: string;
   required: boolean;
   description: string;
+}
+
+let nextRowId = 1;
+export function newExitField(): EditableExitField {
+  return {
+    rowId: `ef-${nextRowId++}`,
+    name: "",
+    type: "string",
+    required: false,
+    description: "",
+  };
 }
 
 export interface EditableNode {
@@ -126,6 +144,63 @@ function ExitFieldRow({
         <Trash2 aria-hidden="true" />
       </Button>
     </div>
+  );
+}
+
+// Agent selector: a dropdown over the workspace's agents (consistent with
+// the template-create dialog) that still accepts the current free-form
+// value — a selector may be a raw UUID or an agent from another workspace,
+// neither of which appears in the list. The extra option round-trips it
+// instead of blanking.
+function AgentSelectorInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const { t } = useT("workflows");
+  const wsId = useWorkspaceId();
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const known = value === "" || agents.some((a) => a.name === value);
+  const items = [
+    ...agents.map((a) => ({ value: a.name, label: a.name })),
+    ...(!known
+      ? [{ value, label: t(($) => $.detail.agent_selector_custom, { name: value }) }]
+      : []),
+  ];
+  return (
+    <Select
+      items={items}
+      value={value}
+      onValueChange={(v) => onChange(v ?? "")}
+    >
+      <SelectTrigger
+        size="sm"
+        className="w-full"
+        aria-label={t(($) => $.detail.agent_selector_label)}
+      >
+        <SelectValue>
+          {value === ""
+            ? t(($) => $.detail.agent_selector_placeholder)
+            : known
+              ? value
+              : t(($) => $.detail.agent_selector_custom, { name: value })}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {agents.map((agent) => (
+          <SelectItem key={agent.id} value={agent.name}>
+            {agent.name}
+          </SelectItem>
+        ))}
+        {!known && (
+          <SelectItem value={value}>
+            {t(($) => $.detail.agent_selector_custom, { name: value })}
+          </SelectItem>
+        )}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -248,10 +323,9 @@ export function NodeEditorCard({
             </div>
             <div className="flex flex-1 flex-col gap-1.5">
               <Label className="text-xs">{t(($) => $.detail.agent_selector_label)}</Label>
-              <Input
+              <AgentSelectorInput
                 value={node.agent_selector}
-                onChange={(e) => onChange({ ...node, agent_selector: e.target.value })}
-                placeholder={t(($) => $.detail.agent_selector_placeholder)}
+                onChange={(next) => onChange({ ...node, agent_selector: next })}
               />
             </div>
             <div className="flex flex-col gap-1.5">
@@ -303,10 +377,7 @@ export function NodeEditorCard({
               onClick={() =>
                 onChange({
                   ...node,
-                  exit_fields: [
-                    ...node.exit_fields,
-                    { name: "", type: "string", required: false, description: "" },
-                  ],
+                  exit_fields: [...node.exit_fields, newExitField()],
                 })
               }
             >
@@ -316,7 +387,7 @@ export function NodeEditorCard({
           </div>
           {node.exit_fields.map((field, fi) => (
             <ExitFieldRow
-              key={fi}
+              key={field.rowId}
               field={field}
               onChange={(next) =>
                 onChange({

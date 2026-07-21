@@ -26,6 +26,16 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
+// The node editor's agent dropdown reads the workspace agent list — empty
+// is fine for these tests (the seeded "codex" value renders via the
+// custom-value fallback option).
+vi.mock("@multica/core/workspace/queries", () => ({
+  agentListOptions: () => ({
+    queryKey: ["agents", "ws-1"],
+    queryFn: () => Promise.resolve([]),
+  }),
+}));
+
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     workflows: () => "/acme/workflows",
@@ -156,14 +166,14 @@ describe("TemplateDetailPage", () => {
     await waitFor(() => expect(apiMock.publishWorkflowTemplate).toHaveBeenCalledWith("tpl-1"));
   });
 
-  it("rejects a save with an empty agent selector before hitting the API", async () => {
+  it("rejects a save with an empty node name before hitting the API", async () => {
     apiMock.getWorkflowTemplate.mockResolvedValue(DRAFT_DETAIL);
 
     renderPage();
 
-    const selectorInput = await screen.findByPlaceholderText("Agent name or UUID");
+    const nameInputs = await screen.findAllByLabelText("Display name");
     const user = userEvent.setup();
-    await user.clear(selectorInput);
+    await user.clear(nameInputs[0]!);
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     // Client-side validation toast; no network write.
@@ -189,5 +199,61 @@ describe("TemplateDetailPage", () => {
     renderPage();
 
     expect(await screen.findByText("Template not found")).toBeInTheDocument();
+  });
+
+  it("warns before saving a non-linear graph as a linear chain", async () => {
+    // A branching draft (out-degree 2 on the head): the list editor can't
+    // represent it, so the banner must surface before the user rewrites
+    // the graph by saving.
+    apiMock.getWorkflowTemplate.mockResolvedValue({
+      ...DRAFT_DETAIL,
+      edges: [
+        { id: "e1", from_node_key: "implement", to_node_key: "acceptance", priority: 0 },
+        { id: "e2", from_node_key: "implement", to_node_key: "end", priority: 1 },
+        { id: "e3", from_node_key: "acceptance", to_node_key: "end", priority: 0 },
+      ],
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/non-linear/);
+  });
+
+  it("does not warn for a plain linear chain", async () => {
+    apiMock.getWorkflowTemplate.mockResolvedValue(DRAFT_DETAIL);
+
+    renderPage();
+
+    await screen.findByLabelText("Name");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("rejects a save with duplicate exit-field names before hitting the API", async () => {
+    apiMock.getWorkflowTemplate.mockResolvedValue({
+      ...DRAFT_DETAIL,
+      nodes: [
+        {
+          ...DRAFT_DETAIL.nodes[0]!,
+          config: {
+            ...DRAFT_DETAIL.nodes[0]!.config,
+            exit_fields: {
+              fields: [
+                { name: "pr_url", type: "string", required: true },
+                { name: "pr_url", type: "string", required: false },
+              ],
+            },
+          },
+        },
+        ...DRAFT_DETAIL.nodes.slice(1),
+      ],
+    });
+
+    renderPage();
+
+    await screen.findByLabelText("Name");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(apiMock.updateWorkflowTemplate).not.toHaveBeenCalled());
   });
 });
