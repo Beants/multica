@@ -124,6 +124,12 @@ func registerWorkflowRoutes(r chi.Router, h *handler.Handler, authMW func(http.H
 			r.Get("/", h.ListWorkflowEvents)
 		})
 
+		// P2-3: aggregated metrics (event_type distribution) for the dashboard.
+		r.Route("/api/workflow-metrics", func(r chi.Router) {
+			r.Use(handler.RequireHumanActor)
+			r.Get("/", h.ListWorkflowMetrics)
+		})
+
 		// P2-2: outbound webhook config CRUD (external event subscriptions).
 		r.Route("/api/workflow-webhooks", func(r chi.Router) {
 			r.Use(handler.RequireHumanActor)
