@@ -1,4 +1,3 @@
-/* eslint-disable i18next/no-literal-string */
 // rule-list-page.test.tsx — P1-fe-2 AC5: rule CRUD flow (list render, create
 // mutation fired with the right payload, empty state).
 
