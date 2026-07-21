@@ -110,6 +110,85 @@ func (q *Queries) ListKnowledgeCandidates(ctx context.Context, arg ListKnowledge
 	return items, nil
 }
 
+const listStaleCandidates = `-- name: ListStaleCandidates :many
+SELECT id, workspace_id, source_type, source_id, content, suggested_key, status, maturity, created_at, updated_at FROM knowledge_candidate
+WHERE workspace_id = $1
+  AND status = 'pending'
+  AND updated_at < now() - ($2::int || ' seconds')::interval
+ORDER BY updated_at ASC
+`
+
+type ListStaleCandidatesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Column2     int32       `json:"column_2"`
+}
+
+// P2-6 health: pending candidates older than the age threshold need review
+// (time factor; code-change correlation is the second factor, follow-up).
+func (q *Queries) ListStaleCandidates(ctx context.Context, arg ListStaleCandidatesParams) ([]KnowledgeCandidate, error) {
+	rows, err := q.db.Query(ctx, listStaleCandidates, arg.WorkspaceID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnowledgeCandidate{}
+	for rows.Next() {
+		var i KnowledgeCandidate
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.SourceType,
+			&i.SourceID,
+			&i.Content,
+			&i.SuggestedKey,
+			&i.Status,
+			&i.Maturity,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateCandidateMaturity = `-- name: UpdateCandidateMaturity :one
+UPDATE knowledge_candidate
+SET maturity = $2, updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, source_type, source_id, content, suggested_key, status, maturity, created_at, updated_at
+`
+
+type UpdateCandidateMaturityParams struct {
+	ID       pgtype.UUID `json:"id"`
+	Maturity string      `json:"maturity"`
+}
+
+// P2-6: mark a candidate's maturity (draft/verified/proven/stale/conflict)
+// after review. Manual via API for MVP; an automated stale sweeper is a
+// follow-up (mirrors the workflow sweeper pattern).
+func (q *Queries) UpdateCandidateMaturity(ctx context.Context, arg UpdateCandidateMaturityParams) (KnowledgeCandidate, error) {
+	row := q.db.QueryRow(ctx, updateCandidateMaturity, arg.ID, arg.Maturity)
+	var i KnowledgeCandidate
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.SourceType,
+		&i.SourceID,
+		&i.Content,
+		&i.SuggestedKey,
+		&i.Status,
+		&i.Maturity,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateKnowledgeCandidateStatus = `-- name: UpdateKnowledgeCandidateStatus :one
 UPDATE knowledge_candidate
 SET status = $2, updated_at = now()

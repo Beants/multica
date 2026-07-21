@@ -135,8 +135,10 @@ func registerWorkflowRoutes(r chi.Router, h *handler.Handler, authMW func(http.H
 			r.Use(handler.RequireHumanActor)
 			r.Post("/", h.CreateKnowledgeCandidate)
 			r.Get("/", h.ListKnowledgeCandidates)
+			r.Get("/stale", h.ListStaleCandidates)
 			r.Route("/{id}", func(r chi.Router) {
 				r.Post("/extract", h.ExtractKnowledgeCandidateToRule)
+				r.Post("/maturity", h.UpdateCandidateMaturity)
 				r.Delete("/", h.DeleteKnowledgeCandidate)
 			})
 		})
