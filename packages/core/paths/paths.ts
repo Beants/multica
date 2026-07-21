@@ -30,6 +30,7 @@ function workspaceScoped(slug: string) {
     workflowRuns: () => `${ws}/workflows/runs`,
     workflowRunDetail: (id: string) => `${ws}/workflows/runs/${encode(id)}`,
     workflowHooks: () => `${ws}/workflows/hooks`,
+    workflowRules: () => `${ws}/workflows/rules`,
     agents: () => `${ws}/agents`,
     newAgent: () => `${ws}/agents/new`,
     agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,

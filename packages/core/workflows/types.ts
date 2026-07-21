@@ -172,6 +172,52 @@ export interface CreateWorkflowHookResponse extends WorkflowHook {
   token: string;
 }
 
+// P1-fe-2: Rules asset (P1-4 API). Three-level team constraints bound to
+// node/template/agent/project via rule_binding.
+export type WorkflowRuleLevel = "hard" | "soft" | "safety";
+export type WorkflowRuleScope = "workspace" | "project" | "agent";
+
+export interface WorkflowRule {
+  id: string;
+  workspace_id: string;
+  name: string;
+  level: WorkflowRuleLevel;
+  scope: WorkflowRuleScope;
+  content: string;
+  config?: unknown;
+  status: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type WorkflowRuleBindingTarget = "node" | "template" | "agent" | "project";
+export type WorkflowRuleEnforcement = "gate_check" | "context_inject";
+
+export interface WorkflowRuleBinding {
+  id: string;
+  rule_id: string;
+  target_type: WorkflowRuleBindingTarget;
+  target_id: string;
+  enforcement: WorkflowRuleEnforcement;
+  created_at: string;
+}
+
+export interface CreateWorkflowRuleRequest {
+  name: string;
+  level: WorkflowRuleLevel;
+  scope?: WorkflowRuleScope;
+  content: string;
+  config?: unknown;
+  status?: string;
+}
+
+export interface CreateWorkflowRuleBindingRequest {
+  target_type: WorkflowRuleBindingTarget;
+  target_id: string;
+  enforcement?: WorkflowRuleEnforcement;
+}
+
 // ---------------------------------------------------------------------------
 // Runs (AC4 trace surface)
 // ---------------------------------------------------------------------------
