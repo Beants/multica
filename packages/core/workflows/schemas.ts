@@ -18,6 +18,7 @@ import type {
   RunDiagnosis,
   WorkflowRule,
   WorkflowRuleBinding,
+  AgentCapability,
 } from "./types";
 
 // A JSONB blob that must be an object when present (config, exit_fields,
@@ -228,6 +229,32 @@ export const EMPTY_WORKFLOW_RULE_BINDING: WorkflowRuleBinding = {
   target_id: "",
   enforcement: "context_inject",
   created_at: "",
+};
+
+// P1-fe-3: agent capability labels.
+export const AgentCapabilitySchema = z
+  .object({
+    id: z.string(),
+    agent_id: z.string().optional().default(""),
+    capability_key: z.string(),
+    proficiency: z.number().optional().default(0),
+    evidence: jsonAny,
+    updated_at: z.string().optional().default(""),
+    created_at: z.string().optional().default(""),
+  })
+  .loose();
+
+export const AgentCapabilityListSchema = z.array(AgentCapabilitySchema).default([]);
+
+export const EMPTY_AGENT_CAPABILITY_LIST: AgentCapability[] = [];
+
+export const EMPTY_AGENT_CAPABILITY: AgentCapability = {
+  id: "",
+  agent_id: "",
+  capability_key: "",
+  proficiency: 0,
+  created_at: "",
+  updated_at: "",
 };
 
 // ---------------------------------------------------------------------------

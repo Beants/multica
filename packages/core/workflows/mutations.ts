@@ -5,6 +5,7 @@ import { workflowKeys } from "./queries";
 import type {
   CreateWorkflowHookRequest,
   CreateWorkflowRuleBindingRequest,
+  CreateAgentCapabilityRequest,
   CreateWorkflowRuleRequest,
   CreateWorkflowTemplateRequest,
   RejectAcceptanceRequest,
@@ -155,6 +156,31 @@ export function useDeleteWorkflowRuleBinding() {
       api.deleteWorkflowRuleBinding(ruleId, bindingId),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: workflowKeys.rules(wsId) });
+    },
+  });
+}
+
+// P1-fe-3: agent capability labels (P1-7 dispatch data). Invalidate the
+// per-agent capability list on write.
+export function useCreateAgentCapability(agentId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data: CreateAgentCapabilityRequest) =>
+      api.createAgentCapability(agentId, data),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: workflowKeys.agentCapabilities(wsId, agentId) });
+    },
+  });
+}
+
+export function useDeleteAgentCapability(agentId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (capId: string) => api.deleteAgentCapability(agentId, capId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: workflowKeys.agentCapabilities(wsId, agentId) });
     },
   });
 }
