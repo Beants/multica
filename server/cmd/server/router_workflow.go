@@ -130,6 +130,17 @@ func registerWorkflowRoutes(r chi.Router, h *handler.Handler, authMW func(http.H
 			r.Get("/", h.ListWorkflowMetrics)
 		})
 
+		// P2-5: knowledge sediment pool (candidates → extract to Rules).
+		r.Route("/api/knowledge-candidates", func(r chi.Router) {
+			r.Use(handler.RequireHumanActor)
+			r.Post("/", h.CreateKnowledgeCandidate)
+			r.Get("/", h.ListKnowledgeCandidates)
+			r.Route("/{id}", func(r chi.Router) {
+				r.Post("/extract", h.ExtractKnowledgeCandidateToRule)
+				r.Delete("/", h.DeleteKnowledgeCandidate)
+			})
+		})
+
 		// P2-2: outbound webhook config CRUD (external event subscriptions).
 		r.Route("/api/workflow-webhooks", func(r chi.Router) {
 			r.Use(handler.RequireHumanActor)
