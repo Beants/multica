@@ -1,6 +1,6 @@
 # 小队规则（Squad Briefing）
 
-> 全队共识——所有 agent 启动时加载。定义流水线全貌、两层状态模型、角色映射、交接契约、门禁规则、准出协议。
+> 全队共识——作为 squad instructions 注入所有成员。定义平台触发机制、流水线全貌、两层状态模型、角色映射、交接契约、门禁规则、准出协议。队长的调度逻辑（创建 child、推进 stage、回退、熔断）由队长 instructions 独立定义，不在本共识中。
 
 ---
 
@@ -15,6 +15,25 @@
 - 流转、唤醒、屏障闭合——交给 Multica 平台（`--stage` 屏障确定性唤醒 parent）。
 - 门禁判定（exit code、lint、测试、基线 diff）——交给脚本，AI 只翻译结果。
 - AI 只做语义判断（写 prd、写代码、审查、根因分析），绝不承担"编排引擎"职责。
+
+## 平台触发机制（全员必知）
+
+你被唤醒只有以下几条路径：
+
+| 动作 | 效果 |
+|---|---|
+| issue 被 assign 给你（非 backlog） | ✅ 你被唤醒 |
+| backlog → todo/in_progress（离开 backlog） | ✅ 你被唤醒 |
+| 你把 child 置 `done` 且 stage 屏障闭合 | ✅ 队长被平台自动唤醒（系统评论 + mention） |
+| 评论里 `[@你](mention://agent/<id>)` | ✅ 你被唤醒 |
+| `multica issue rerun <id>` | ✅ 强制新 run |
+| subscribe / 纯文本写名字 / 普通评论 | ❌ 只有通知，不触发 |
+
+**关键规则**：
+
+1. 完成工作后，把 child issue 置为 `done`——平台会自动唤醒队长。**不要 @ 队长**，会造成 mention 循环。
+2. `done → todo` 的回退转移**不会**唤醒 agent。队长回退时会用 `rerun` 或 `@mention` 显式触发你。
+3. 阻塞时也置 `done`，在 verdict block 里写 `verdict: blocked`。不要把 issue 置为 `blocked` 状态——`blocked` 不是终态，不会闭合 stage 屏障。
 
 ## 流水线
 

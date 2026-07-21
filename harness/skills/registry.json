@@ -98,6 +98,31 @@
       "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
       "last_synced": "2026-07-15T10:02:46Z",
       "multica_id": "05be5238-70ce-40ce-ba99-4cfc432f349d"
+    },
+    {
+      "name": "harness-gates",
+      "repo": null,
+      "_doc": "自造 skill，非社区同步。门禁脚本集，随 skill 注入 workdir。",
+      "ref": null,
+      "role": "gate-runner",
+      "files": [
+        "gates/api_gate.py",
+        "gates/baseline.py",
+        "gates/delivery_checklist.py",
+        "gates/detect_tests.py",
+        "gates/gate_prd_confirm.py",
+        "gates/gate_result.py",
+        "gates/plan_contract_check.py",
+        "gates/rollback_counter.py",
+        "gates/scar_summary.py",
+        "gates/spec_freshness.py",
+        "gates/task_resolver.py",
+        "gates/verification_contract_check.py",
+        "gates/workflow_integrity_check.py"
+      ],
+      "pinned": null,
+      "last_synced": null,
+      "multica_id": "1855178a-9e86-4887-bc78-43a6c46dc658"
     }
   ]
 }

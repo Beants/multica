@@ -18,26 +18,18 @@ harness/
 │   ├── bulk-experiment-report.md    ← 30 次对比实验（零方差数据）
 │   ├── ref-*.md                     ← 行业参考（腾讯/TAB/SwarmAI/Multica）
 │   └── ref-multica-*.md|.go         ← Multica 源码文档
-├── squad-briefing.md                ← 全队共识（流水线 + 角色 + 交接 + 门禁）
+├── squad-briefing.md                ← squad instructions（全队共识：触发机制 + 流水线 + 角色 + 交接 + 门禁）
 ├── leader/
-│   └── leader-prompt.md             ← 队长指令（调度逻辑）
+│   └── leader-prompt.md             ← 队长 agent instructions（调度逻辑）
 ├── skills/
 │   ├── registry.json                ← 外部 skill 扒取清单（来源 + 锁定 + 新鲜度）
-│   ├── planner/                     ← 规划员指令 + 同步来的 brainstorming / writing-plans
-│   ├── implementer/                 ← 实现员指令 + 同步来的 tdd / executing-plans / ...
-│   ├── reviewer/                    ← 审查员指令 + 同步来的 code-review / systematic-debugging
-│   └── gate-runner/                 ← 门禁执行器指令 + 同步来的 verification-before-completion
+│   ├── planner/                     ← 规划员 agent instructions + 同步来的 brainstorming / writing-plans
+│   ├── implementer/                 ← 实现员 agent instructions + 同步来的 tdd / executing-plans / ...
+│   ├── reviewer/                    ← 审查员 agent instructions + 同步来的 code-review / systematic-debugging
+│   └── gate-runner/                 ← 门禁执行器 agent instructions + harness-gates skill (含 gates/*.py) + verification-before-completion
 ├── pipeline/
 │   ├── standard.yaml                ← 标准流水线定义
 │   └── bugfix.yaml                  ← Bugfix 流水线定义
-├── gates/                           ← 门禁脚本（13 个 Python：含 detect_tests / api_gate）
-│   ├── baseline.py                  ← 实现前后测试快照 + diff
-│   ├── plan_contract_check.py       ← 规划制品完整性检查
-│   ├── delivery_checklist.py        ← 交付完整性检查
-│   ├── gate_result.py               ← 门禁事件记录
-│   ├── rollback_counter.py          ← 回退计数 + 熔断
-│   ├── scar_summary.py              ← 软门禁伤疤汇总
-│   └── ...
 ├── guides/                          ← 方法论指南（11 篇）
 │   ├── script-first-architecture.md ← 核心设计哲学
 │   ├── executor-protocol.md         ← AI 行为约束
@@ -54,8 +46,7 @@ harness/
 
 ### 1. 在 Multica 上创建小队
 
-在 [Multica](https://multica.ai) 上创建 5 个 agent：
-
+在 [Multica](https://multica.ai) 上创建 1 个 squad + 5 个 agent：\n
 | Agent | CLI | 职责 |
 |---|---|---|
 | 队长-Leader | Hermes / Claude | 调度编排 |
@@ -64,7 +55,14 @@ harness/
 | 门禁执行器-GateRunner | 任意最省的 | 跑脚本 |
 | 代码审查员-Reviewer | Claude / OpenCode | 读 diff 写 verdict |
 
-把 `squad-briefing.md` 内容设为所有 agent 的共享上下文。把各自的 `prompt.md` 设为对应 agent 的 instructions。
+**Instructions 分离**（关键）：
+
+- **Squad instructions** ← `squad-briefing.md`（全队共识：平台触发机制、流水线、角色、交接、门禁）
+- **Agent instructions** ← 各自 `prompt.md`（角色专属行为，不含全队共识）
+
+Multica 平台会在 task dispatch 时分别注入 squad instructions 和 agent instructions，不要把全队共识复制进每个 agent。
+
+**门禁脚本**：打包成 `harness-gates` skill（`skills/gate-runner/harness-gates/` 下含 SKILL.md + `gates/` 13 个脚本），绑到门禁执行器 agent。task dispatch 时 daemon 自动把脚本写进 workdir 的 `.claude/skills/harness-gates/gates/`，不需要项目 repo 自带。门禁执行器 prompt 里用 `GATES_DIR` 变量动态定位。
 
 ### 2. 挂载 local_directory
 
@@ -73,6 +71,8 @@ multica project create my-project
 multica project resource add my-project --type local_directory \
   --local-path /path/to/your/repo --daemon-id <daemon>
 ```
+
+> 门禁脚本不需要在项目 repo 里。`harness-gates` skill 绑在门禁执行器 agent 上，每次 task dispatch 时 daemon 自动注入 workdir。
 
 ### 3. 发起一个需求
 
@@ -85,26 +85,53 @@ multica issue create --title "你的需求" --assignee-id <队长uuid> --status 
 
 队长会自动创建分阶段子 issue 并推进流水线。所有跨阶段状态写在 **parent issue 的 metadata**（原子并发安全 KV），各角色的准出裁定发在 **child issue 的评论**——见 `squad-briefing.md` 的「两层状态模型」。
 
-## 方法论 skill（不自编，从社区同步 → 注册成 multica workspace skill）
+## Skill 体系
 
-角色 prompt（`skills/*/prompt.md`）只定义"你是谁"；具体方法论从社区优秀 repo 同步，**不自编**——对标应用宝 §2.2「skill 是注意力管理」。
+Harness 有两类 skill，都通过 `register_skills.py` 注册到 Multica workspace skill，再 bind 到对应 role agent：
 
-三步流程：
+### 类一：社区方法论 skill（同步）
+
+从 [obra/superpowers](https://github.com/obra/superpowers) 同步，不自编——对标应用宝「skill 是注意力管理」。角色 prompt（`skills/*/prompt.md`）只定义"你是谁"；具体方法论从社区优秀 repo 同步。
 
 ```bash
-# 1. 同步：从 obra/superpowers 等拉取 SKILL.md 到本地
+# 1. 同步：从上游 repo 拉取 SKILL.md 到本地
 python3 harness/cli/sync_skills.py sync
 
 # 2. 注册：把本地 skill 注册成 multica workspace skill（幂等，按 name 查重）
 python3 harness/cli/register_skills.py
 
-# 3. 绑定：在 multica UI 把 skill bind 到对应 role agent（agent.skills）
-#    register 会打印 role → skill_id 映射作为 bind 指引
+# 3. 绑定：register 会自动 bind 到匹配的 role agent
 ```
 
-**为什么走 multica 原生 skill 机制**：bind 后，task dispatch 时 multica daemon 把 SKILL.md 写进 workdir 的 provider 原生 skill 目录（`.claude/skills/`、`.pi/skills/`…），agent CLI 按 frontmatter `description` 自动触发（progressive disclosure）——所以 **role prompt 不引用 skill**，CLI 自己发现。映射是 **1 agent : N skill**（一个 skill 解决一类问题；Qoder 经验值 <10）。
+**新鲜度**：用 multica autopilot 定时跑 `sync_skills.py check`，落后写 issue。每个 skill 带 `.source.json`（repo / commit / hash）。
 
-**新鲜度**：用 multica autopilot（schedule，如每周）定时跑 `sync_skills.py check`，落后写 issue；确认后 `sync` + `register` 升级。每个 skill 带 `.source.json`（repo / commit / hash）。新增上游只需在 `skills/registry.json` 加一条 entry。
+### 类二：自造工程 skill（harness-gates）
+
+`harness-gates` 是自造 skill（`repo: null` in registry.json），包含 13 个门禁脚本。不走社区同步，直接由 `register_skills.py` 注册。
+
+```
+skills/gate-runner/harness-gates/
+├── SKILL.md           ← 告诉 agent 脚本在哪、怎么调用
+└── gates/             ← 13 个 Python 门禁脚本
+    ├── plan_contract_check.py
+    ├── baseline.py
+    ├── api_gate.py
+    └── ...
+```
+
+register_skills.py 对两类 skill 统一处理：`repo != null` 走社区同步路径，`repo == null` 走本地自造路径。注册时都会 upsert SKILL.md + 所有 files 到 Multica。
+
+### Skill 绑定关系
+
+| Agent | 社区 skill | 自造 skill |
+|---|---|---|
+| 规划员-Planner | brainstorming, writing-plans | — |
+| 实现员-Implementer | executing-plans, test-driven-development, receiving-code-review | — |
+| 门禁执行器-GateRunner | verification-before-completion | **harness-gates** |
+| 代码审查员-Reviewer | requesting-code-review, systematic-debugging | — |
+| 队长-Leader | — | — |
+
+**为什么走 multica 原生 skill 机制**：bind 后，task dispatch 时 multica daemon 把 SKILL.md + files 写进 workdir 的 provider 原生 skill 目录（`.claude/skills/`、`.pi/skills/`…），agent CLI 按 frontmatter `description` 自动触发（progressive disclosure）。映射是 **1 agent : N skill**。新增上游只需在 `skills/registry.json` 加一条 entry。
 
 ## 设计哲学
 
