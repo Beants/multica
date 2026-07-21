@@ -123,6 +123,14 @@ func registerWorkflowRoutes(r chi.Router, h *handler.Handler, authMW func(http.H
 			r.Use(handler.RequireHumanActor)
 			r.Get("/", h.ListWorkflowEvents)
 		})
+
+		// P2-2: outbound webhook config CRUD (external event subscriptions).
+		r.Route("/api/workflow-webhooks", func(r chi.Router) {
+			r.Use(handler.RequireHumanActor)
+			r.Post("/", h.CreateOutboundWebhook)
+			r.Get("/", h.ListOutboundWebhooks)
+			r.Delete("/{id}", h.DeleteOutboundWebhook)
+		})
 	})
 }
 
