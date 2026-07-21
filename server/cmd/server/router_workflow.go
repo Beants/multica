@@ -128,6 +128,7 @@ func registerWorkflowRoutes(r chi.Router, h *handler.Handler, authMW func(http.H
 		r.Route("/api/workflow-metrics", func(r chi.Router) {
 			r.Use(handler.RequireHumanActor)
 			r.Get("/", h.ListWorkflowMetrics)
+			r.Get("/insights", h.ListWorkflowInsights)
 		})
 
 		// P2-5: knowledge sediment pool (candidates → extract to Rules).
