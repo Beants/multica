@@ -127,6 +127,10 @@ type NavKey =
   | "agents"
   | "squads"
   | "workflows"
+  | "workflowRuns"
+  | "workflowHooks"
+  | "workflowRules"
+  | "workflowDashboard"
   | "usage"
   | "runtimes"
   | "skills"
@@ -143,6 +147,10 @@ type NavLabelKey =
   | "agents"
   | "squads"
   | "workflows"
+  | "workflow_runs"
+  | "workflow_hooks"
+  | "workflow_rules"
+  | "workflow_dashboard"
   | "usage"
   | "runtimes"
   | "skills"
@@ -160,8 +168,19 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
   { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "agents", labelKey: "agents", icon: Bot },
   { key: "squads", labelKey: "squads", icon: Users },
-  { key: "workflows", labelKey: "workflows", icon: Workflow },
   { key: "usage", labelKey: "usage", icon: BarChart3 },
+];
+
+// Workflow section — sits ABOVE workspaceNav, flag-gated as a whole.
+// Templates entry reuses the workflows path (template list); the rest are
+// the workflow sub-surfaces that were previously only reachable from the
+// template-list-page header buttons.
+const workflowNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
+  { key: "workflows", labelKey: "workflows", icon: Workflow },
+  { key: "workflowRuns", labelKey: "workflow_runs", icon: Workflow },
+  { key: "workflowHooks", labelKey: "workflow_hooks", icon: Workflow },
+  { key: "workflowRules", labelKey: "workflow_rules", icon: Workflow },
+  { key: "workflowDashboard", labelKey: "workflow_dashboard", icon: Workflow },
 ];
 
 const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
@@ -745,13 +764,37 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             </Collapsible>
           )}
 
+          {workflowEngineEnabled && (
+            <SidebarGroup>
+              <SidebarGroupLabel>{t(($) => $.sidebar.workflow_group)}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu className="gap-0.5">
+                  {workflowNav.map((item) => {
+                    const href = p[item.key]();
+                    const isActive = !isActivePinnedRoute && isNavActive(pathname, href);
+                    return (
+                      <SidebarMenuItem key={item.key}>
+                        <SidebarMenuButton
+                          isActive={isActive}
+                          render={<AppLink href={href} />}
+                          className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                        >
+                          <item.icon />
+                          <span>{t(($) => $.nav[item.labelKey])}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
+
           <SidebarGroup>
             <SidebarGroupLabel>{t(($) => $.sidebar.workspace_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {workspaceNav
-                  .filter((item) => item.key !== "workflows" || workflowEngineEnabled)
-                  .map((item) => {
+                {workspaceNav.map((item) => {
                     const href = p[item.key]();
                     const isActive = !isActivePinnedRoute && isNavActive(pathname, href);
                     return (

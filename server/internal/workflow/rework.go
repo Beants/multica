@@ -264,11 +264,14 @@ func (e *Engine) buildHandoffNote(ctx context.Context, run db.WorkflowRun, snap 
 		return finalizeHandoffNote(b.String())
 	}
 
-	instructions := sanitizePromptText(node.Config.Instructions)
-	if instructions == "" {
-		instructions = "(no node instructions)"
+	// Node-level instructions are OPTIONAL — the agent carries its own
+	// prompt (multica agent.instructions, injected by the daemon as the
+	// system prompt). Only emit [instructions] when the node sets a
+	// specific override; an empty node instructions means "use the agent's
+	// own prompt", which is the common case (one agent = one role).
+	if raw := sanitizePromptText(node.Config.Instructions); raw != "" {
+		fmt.Fprintf(&b, "[instructions] %s\n", raw)
 	}
-	fmt.Fprintf(&b, "[instructions] %s\n", instructions)
 
 	// P1-4: inject soft context_inject rules bound to the dispatching agent
 	// (team conventions the agent should honor). Best-effort — a lookup
