@@ -10,6 +10,8 @@ export const workflowKeys = {
   runs: (wsId: string) => [...workflowKeys.all(wsId), "runs"] as const,
   run: (wsId: string, id: string) =>
     [...workflowKeys.all(wsId), "runs", id] as const,
+  diagnosis: (wsId: string, id: string) =>
+    [...workflowKeys.run(wsId, id), "diagnosis"] as const,
 };
 
 export function workflowTemplateListOptions(wsId: string) {
@@ -44,5 +46,13 @@ export function workflowRunDetailOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: workflowKeys.run(wsId, id),
     queryFn: () => api.getWorkflowRun(id),
+  });
+}
+
+// P1-fe-1: per-step seven-element diagnosis for the run detail "Diagnosis" tab.
+export function workflowRunDiagnosisOptions(wsId: string, id: string) {
+  return queryOptions({
+    queryKey: workflowKeys.diagnosis(wsId, id),
+    queryFn: () => api.getRunDiagnosis(id),
   });
 }

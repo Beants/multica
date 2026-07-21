@@ -20,6 +20,7 @@ import { useT, useTimeAgo } from "../../i18n";
 import { AcceptancePanel } from "./acceptance-panel";
 import { RunStatusBadge, StepStatusBadge } from "./status-badges";
 import { StepTimeline } from "./step-timeline";
+import { DiagnosisPanel } from "./diagnosis-panel";
 import { SubmissionView } from "./submission-view";
 import { VerdictView } from "./verdict-view";
 
@@ -193,6 +194,8 @@ export function RunDetailPage({ runId }: { runId: string }) {
         </div>
 
         <StepTimeline transitions={run.transitions} steps={steps} />
+
+        <DiagnosisPanel wsId={wsId} runId={runId} enabled={enabled} />
       </div>
     </div>
   );
