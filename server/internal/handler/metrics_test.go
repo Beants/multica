@@ -16,6 +16,9 @@ import (
 func TestListWorkflowMetrics(t *testing.T) {
 	ctx := context.Background()
 	wsID := util.MustParseUUID(testWorkspaceID)
+	// AggregateEventsByType reads the WHOLE workspace; clear leftovers from
+	// other tests so the counts are exact (CI runs the full suite).
+	testPool.Exec(ctx, `DELETE FROM event_store WHERE workspace_id = $1`, wsID)
 	ws := util.UUIDToString(wsID)
 
 	// 3 alpha + 1 beta → alpha ranks first.
