@@ -16,6 +16,9 @@ import (
 func TestListWorkflowInsights(t *testing.T) {
 	ctx := context.Background()
 	wsID := util.MustParseUUID(testWorkspaceID)
+	// Insights derive share from ALL workspace events; clear leftovers so
+	// 8+2 = total 10 (exact 80%/20%).
+	testPool.Exec(ctx, `DELETE FROM event_store WHERE workspace_id = $1`, wsID)
 	ws := util.UUIDToString(wsID)
 
 	// 8 dominant + 2 minor → dominant ~80% (≥40% → "dominates"), minor ~20% (≥20% → "significant").
