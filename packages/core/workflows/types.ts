@@ -235,6 +235,22 @@ export interface CreateAgentCapabilityRequest {
   proficiency: number;
 }
 
+// P2-4: observability dashboard types (event_store read + metrics).
+export interface EventStoreRow {
+  id: string;
+  workspace_id?: string;
+  event_type: string;
+  actor_type?: string;
+  actor_id?: string;
+  payload?: unknown;
+  occurred_at: string;
+}
+
+export interface MetricRow {
+  event_type: string;
+  event_count: number;
+}
+
 // ---------------------------------------------------------------------------
 // Runs (AC4 trace surface)
 // ---------------------------------------------------------------------------

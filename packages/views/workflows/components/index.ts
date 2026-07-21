@@ -5,6 +5,7 @@ export { RunListPage } from "./run-list-page";
 export { RunDetailPage } from "./run-detail-page";
 export { HookListPage } from "./hook-list-page";
 export { RuleListPage } from "./rule-list-page";
+export { DashboardPage } from "./dashboard-page";
 export { CreateHookDialog } from "./create-hook-dialog";
 export { AcceptancePanel } from "./acceptance-panel";
 export { StepTimeline } from "./step-timeline";
