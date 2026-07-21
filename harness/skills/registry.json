@@ -12,7 +12,7 @@
       ],
       "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
       "last_synced": "2026-07-15T10:01:49Z",
-      "multica_id": "3a4c949b-5b76-4d83-b048-18bd7e3fcfe7"
+      "multica_id": "c35ebeb9-3323-4515-bf49-2a3af59d77be"
     },
     {
       "name": "writing-plans",
@@ -24,7 +24,7 @@
       ],
       "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
       "last_synced": "2026-07-15T10:01:56Z",
-      "multica_id": "285485c8-145d-415d-8921-7913b66910e4"
+      "multica_id": "01f9a357-79b7-4c03-a52d-d72f1b6a08fa"
     },
     {
       "name": "test-driven-development",
@@ -37,7 +37,7 @@
       ],
       "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
       "last_synced": "2026-07-15T10:02:05Z",
-      "multica_id": "4f39bcb8-fa31-4ed1-81ad-65b0b6e0bdf3"
+      "multica_id": "3a8125b4-d572-4f7f-bf6b-b25beec99d7b"
     },
     {
       "name": "executing-plans",
@@ -49,7 +49,7 @@
       ],
       "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
       "last_synced": "2026-07-15T10:02:15Z",
-      "multica_id": "89f66965-8fcf-4314-bf19-ed4d4f517101"
+      "multica_id": "aefa0afb-8956-48e8-b547-cc4a41cd4fc2"
     },
     {
       "name": "requesting-code-review",
@@ -61,7 +61,7 @@
       ],
       "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
       "last_synced": "2026-07-15T10:02:22Z",
-      "multica_id": "36a0e938-8a50-4e9c-b79f-b0c1873afd6a"
+      "multica_id": "6d9d623e-a97c-4fcd-a30f-f9175b7fb358"
     },
     {
       "name": "receiving-code-review",
@@ -73,7 +73,7 @@
       ],
       "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
       "last_synced": "2026-07-15T10:02:31Z",
-      "multica_id": "b2a3c7aa-3ac3-4803-b8d6-dd1c49edef8e"
+      "multica_id": "a76fcc9d-5af0-4ea9-8e15-e498cf205d14"
     },
     {
       "name": "systematic-debugging",
@@ -85,7 +85,7 @@
       ],
       "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
       "last_synced": "2026-07-15T10:02:39Z",
-      "multica_id": "44098b6c-1b2c-4894-b0a2-4771ff48a2d8"
+      "multica_id": "99d0c38d-9213-419e-a2a6-922c6c2aeafa"
     },
     {
       "name": "verification-before-completion",
@@ -97,7 +97,7 @@
       ],
       "pinned": "d884ae04edebef577e82ff7c4e143debd0bbec99",
       "last_synced": "2026-07-15T10:02:46Z",
-      "multica_id": "05be5238-70ce-40ce-ba99-4cfc432f349d"
+      "multica_id": "48ce54f9-c9f6-41fe-985b-10eab9fd9782"
     },
     {
       "name": "harness-gates",
@@ -122,7 +122,7 @@
       ],
       "pinned": null,
       "last_synced": null,
-      "multica_id": "1855178a-9e86-4887-bc78-43a6c46dc658"
+      "multica_id": "9ba2395c-80d1-4b90-9215-e8c9614b0bc8"
     }
   ]
 }
