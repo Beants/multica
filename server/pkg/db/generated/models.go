@@ -476,6 +476,18 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type EventStore struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	EventType   string             `json:"event_type"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+	Payload     []byte             `json:"payload"`
+	OccurredAt  pgtype.Timestamptz `json:"occurred_at"`
+	DedupKey    string             `json:"dedup_key"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type Feedback struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`

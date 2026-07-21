@@ -378,6 +378,10 @@ func main() {
 	workflowEngine := newWorkflowEngineForListeners(h)
 	registerWorkflowListeners(bus, workflowEngine, flags)
 
+	// P2-1: global event_store — SubscribeAll listener persists every event
+	// for metrics (P2-3) / webhooks (P2-2) / dashboard (P2-4).
+	registerEventStoreListener(bus, h.Queries)
+
 	// P1-5: workflow sweeper (re-dispatch taskless steps / reset deadline-
 	// expired / pause runs with long-blocked steps). Same ctx as the
 	// runtime sweeper so both wind down together on shutdown.
