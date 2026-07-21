@@ -24,3 +24,21 @@ RETURNING *;
 
 -- name: DeleteKnowledgeCandidate :exec
 DELETE FROM knowledge_candidate WHERE id = $1;
+
+-- name: ListStaleCandidates :many
+-- P2-6 health: pending candidates older than the age threshold need review
+-- (time factor; code-change correlation is the second factor, follow-up).
+SELECT * FROM knowledge_candidate
+WHERE workspace_id = $1
+  AND status = 'pending'
+  AND updated_at < now() - ($2::int || ' seconds')::interval
+ORDER BY updated_at ASC;
+
+-- name: UpdateCandidateMaturity :one
+-- P2-6: mark a candidate's maturity (draft/verified/proven/stale/conflict)
+-- after review. Manual via API for MVP; an automated stale sweeper is a
+-- follow-up (mirrors the workflow sweeper pattern).
+UPDATE knowledge_candidate
+SET maturity = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -152,6 +153,65 @@ func (h *Handler) DeleteKnowledgeCandidate(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListStaleCandidates GET /api/knowledge-candidates/stale?age_days=30
+// P2-6 health: pending candidates older than age_days need review (time factor;
+// code-change correlation is the second factor, follow-up).
+func (h *Handler) ListStaleCandidates(w http.ResponseWriter, r *http.Request) {
+	wsID, ok := parseUUIDOrBadRequest(w, ctxWorkspaceID(r.Context()), "workspace_id")
+	if !ok {
+		return
+	}
+	ageDays := 30
+	if d := r.URL.Query().Get("age_days"); d != "" {
+		if n, err := strconv.Atoi(d); err == nil && n > 0 {
+			ageDays = n
+		}
+	}
+	cands, err := h.Queries.ListStaleCandidates(r.Context(), db.ListStaleCandidatesParams{
+		WorkspaceID: wsID,
+		Column2:     int32(ageDays * 86400),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list stale candidates")
+		return
+	}
+	out := make([]knowledgeCandidateDTO, 0, len(cands))
+	for _, c := range cands {
+		out = append(out, candidateToDTO(c))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// UpdateCandidateMaturity POST /api/knowledge-candidates/{id}/maturity
+// P2-6: mark a candidate's maturity after review.
+func (h *Handler) UpdateCandidateMaturity(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "id")
+	if !ok {
+		return
+	}
+	var req struct {
+		Maturity string `json:"maturity"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	valid := map[string]bool{"draft": true, "verified": true, "proven": true, "stale": true, "conflict": true}
+	if !valid[req.Maturity] {
+		writeError(w, http.StatusBadRequest, "maturity must be draft/verified/proven/stale/conflict")
+		return
+	}
+	cand, err := h.Queries.UpdateCandidateMaturity(r.Context(), db.UpdateCandidateMaturityParams{
+		ID:       id,
+		Maturity: req.Maturity,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update maturity")
+		return
+	}
+	writeJSON(w, http.StatusOK, candidateToDTO(cand))
 }
 
 func candidateToDTO(c db.KnowledgeCandidate) knowledgeCandidateDTO {
