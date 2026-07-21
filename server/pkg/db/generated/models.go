@@ -694,6 +694,19 @@ type IssueToLabel struct {
 	LabelID pgtype.UUID `json:"label_id"`
 }
 
+type KnowledgeCandidate struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	SourceType   string             `json:"source_type"`
+	SourceID     pgtype.UUID        `json:"source_id"`
+	Content      string             `json:"content"`
+	SuggestedKey pgtype.Text        `json:"suggested_key"`
+	Status       string             `json:"status"`
+	Maturity     string             `json:"maturity"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type LarkBindingToken struct {
 	TokenHash      string             `json:"token_hash"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
