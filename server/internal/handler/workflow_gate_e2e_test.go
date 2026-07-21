@@ -123,6 +123,27 @@ func postWorkDone(t *testing.T, wh *WorkflowHandler, taskID, agentID string) *ht
 	return w
 }
 
+// gateRunStatusEventually polls the gate_run status until it leaves "running"
+// (the txB UPDATE that finalizes the gate_run lands a beat after the
+// post-submission read on slow CI runners) or a 10s deadline passes. Returns
+// the terminal status. Stabilizes TestAC7/AC8 against the CI status-update
+// race that the process-group kill (P1-4 gate fix) reduced but did not fully
+// eliminate on GitHub Actions runners.
+func gateRunStatusEventually(t *testing.T, runID, nodeKey string) string {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		status, _ := gateRunForRunStep(t, runID, nodeKey)["status"].(string)
+		if status != "running" {
+			return status
+		}
+		if time.Now().After(deadline) {
+			return status
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // gateRunForRunStep returns the latest gate_run row for the given run's
 // gate step. The gate node always activates exactly one gate_run per
 // activation; querying by step_instance_id keeps the assertion local.
@@ -536,10 +557,10 @@ func TestAC7ScriptGateTimeout(t *testing.T) {
 	if got := runStatusForRun(t, runID); got != workflow.RunPaused && got != workflow.RunFailed {
 		t.Fatalf("run = %q, want paused or failed (timeout)", got)
 	}
-	gr := gateRunForRunStep(t, runID, "gate")
-	if got := gr["status"]; got != "error" {
+	if got := gateRunStatusEventually(t, runID, "gate"); got != "error" {
 		t.Fatalf("gate_run.status = %v, want error (timeout)", got)
 	}
+	gr := gateRunForRunStep(t, runID, "gate")
 	// stderr carries the timeout message (executeScript overrides
 	// stderr with "timeout after Xs" on context.DeadlineExceeded).
 	out, _ := gr["output"].(map[string]any)
@@ -592,10 +613,10 @@ func TestAC8ScriptGateOutputTruncation(t *testing.T) {
 	if got := runStatusForRun(t, runID); got != workflow.RunPaused && got != workflow.RunFailed {
 		t.Fatalf("run = %q, want paused or failed", got)
 	}
-	gr := gateRunForRunStep(t, runID, "gate")
-	if got := gr["status"]; got != "error" {
+	if got := gateRunStatusEventually(t, runID, "gate"); got != "error" {
 		t.Fatalf("gate_run.status = %v, want error (non-JSON last line)", got)
 	}
+	gr := gateRunForRunStep(t, runID, "gate")
 	out, _ := gr["output"].(map[string]any)
 	if out == nil {
 		t.Fatalf("gate_run.output missing; raw=%s", gr["raw"])
