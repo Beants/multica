@@ -15,6 +15,7 @@ import type {
   WorkflowRunDetail,
   WorkflowTemplate,
   WorkflowTemplateDetail,
+  RunDiagnosis,
 } from "./types";
 
 // A JSONB blob that must be an object when present (config, exit_fields,
@@ -320,6 +321,41 @@ export const EMPTY_WORKFLOW_RUN_DETAIL: WorkflowRunDetail = {
   verdicts: [],
   acceptances: [],
   transitions: [],
+};
+
+// P1-fe-1: diagnosis schemas (mirror server DTO). Same leniency: enums stay
+// z.string() so a new failure_type renders as a generic row instead of
+// failing safeParse; output is jsonAny (D-9 forward compat).
+export const StepDiagnosisSchema = z
+  .object({
+    step_id: z.string(),
+    node_key: z.string().optional().default(""),
+    run_id: z.string().optional().default(""),
+    task_id: z.string().optional(),
+    agent_id: z.string().optional(),
+    attempt: z.number().optional().default(1),
+    max_attempts: z.number().optional(),
+    final_status: z.string().optional().default(""),
+    ok: z.boolean().optional().default(true),
+    failure_type: z.string().optional(),
+    reason: z.string().optional(),
+    output: jsonAny,
+    transitions: z.array(WorkflowTransitionSchema).default([]),
+  })
+  .loose();
+
+export const RunDiagnosisSchema = z
+  .object({
+    run_id: z.string(),
+    run_status: z.string().optional().default(""),
+    steps: z.array(StepDiagnosisSchema).default([]),
+  })
+  .loose();
+
+export const EMPTY_RUN_DIAGNOSIS: RunDiagnosis = {
+  run_id: "",
+  run_status: "",
+  steps: [],
 };
 
 export const AcceptanceDecisionSchema = z

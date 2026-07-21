@@ -164,6 +164,7 @@ import type {
   WorkflowHook,
   WorkflowRun,
   WorkflowRunDetail,
+  RunDiagnosis,
   WorkflowTemplate,
   WorkflowTemplateDetail,
 } from "../workflows/types";
@@ -175,6 +176,7 @@ import {
   EMPTY_WORKFLOW_HOOK,
   EMPTY_WORKFLOW_HOOK_LIST,
   EMPTY_WORKFLOW_RUN_DETAIL,
+  EMPTY_RUN_DIAGNOSIS,
   EMPTY_WORKFLOW_RUN_LIST,
   EMPTY_WORKFLOW_TEMPLATE,
   EMPTY_WORKFLOW_TEMPLATE_DETAIL,
@@ -182,6 +184,7 @@ import {
   WorkflowHookListSchema,
   WorkflowHookSchema,
   WorkflowRunDetailSchema,
+  RunDiagnosisSchema,
   WorkflowRunListSchema,
   WorkflowTemplateDetailSchema,
   WorkflowTemplateListSchema,
@@ -2895,6 +2898,14 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/workflow-runs/${id}`);
     return parseWithFallback(raw, WorkflowRunDetailSchema, EMPTY_WORKFLOW_RUN_DETAIL, {
       endpoint: "GET /api/workflow-runs/:id",
+    });
+  }
+
+  // P1-fe-1: seven-element per-step diagnosis for the run detail "Diagnosis" tab.
+  async getRunDiagnosis(runId: string): Promise<RunDiagnosis> {
+    const raw = await this.fetch<unknown>(`/api/workflow-runs/${runId}/diagnosis`);
+    return parseWithFallback(raw, RunDiagnosisSchema, EMPTY_RUN_DIAGNOSIS, {
+      endpoint: "GET /api/workflow-runs/:id/diagnosis",
     });
   }
 

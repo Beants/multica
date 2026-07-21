@@ -279,6 +279,30 @@ export interface WorkflowRunDetail extends WorkflowRun {
   transitions: WorkflowTransition[];
 }
 
+// P1-fe-1: one step's seven-element diagnosis (军团文 §4.5). Mirrors the
+// server stepDiagnosisDTO in workflow_run_diagnosis.go.
+export interface StepDiagnosis {
+  step_id: string;
+  node_key: string;
+  run_id: string;
+  task_id?: string; // ①
+  agent_id?: string; // ②
+  attempt: number; // ⑥
+  max_attempts?: number; // ⑥
+  final_status: string; // ⑦
+  ok: boolean;
+  failure_type?: string; // ③ fail/blocked/rework/gate_reject
+  reason?: string; // ④ assembled failure reason
+  output?: unknown; // ⑤ gate_run.output / agent_task.result
+  transitions: WorkflowTransition[]; // ⑥ retry history
+}
+
+export interface RunDiagnosis {
+  run_id: string;
+  run_status: string;
+  steps: StepDiagnosis[];
+}
+
 export interface RejectAcceptanceRequest {
   reject_to_node_key: string;
   reason: string;
