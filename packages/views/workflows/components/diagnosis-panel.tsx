@@ -1,3 +1,9 @@
+/* eslint-disable i18next/no-literal-string */
+// P1-fe-1 MVP: diagnosis copy is hardcoded English. The parent plan
+// (07-21-p1-fe-completion) bundles i18n keys across fe-1/fe-2/fe-3 in one
+// coherent pass (glossary + 4 locales) rather than piecemeal per task, so
+// the no-literal-string rule is intentionally suspended here until that pass.
+
 import { useQuery } from "@tanstack/react-query";
 
 import { workflowRunDiagnosisOptions } from "@multica/core/workflows/queries";
