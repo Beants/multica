@@ -116,6 +116,13 @@ func registerWorkflowRoutes(r chi.Router, h *handler.Handler, authMW func(http.H
 				r.Delete("/bindings/{bindingId}", ruleH.DeleteBinding)
 			})
 		})
+
+		// P2-1: event_store read API (dashboard feed + operator queries).
+		// workspace-scoped via ctxWorkspaceID; RequireHumanActor (operator surface).
+		r.Route("/api/workflow-events", func(r chi.Router) {
+			r.Use(handler.RequireHumanActor)
+			r.Get("/", h.ListWorkflowEvents)
+		})
 	})
 }
 
