@@ -52,7 +52,7 @@
 | 6 代码审查 | 代码审查员 | soft gate（不阻断） | review-verdict.yaml |
 | 7 验收 | 人类 | 验收 | done / 驳回 |
 
-> **★ Spec Freeze 不是 `--stage`。** Multica 的 `--stage` 是整数（`issue.stage` Int32），没有 2.5。Spec Freeze 的平台原生落法：阶段 2 闭合后，队长把 **parent 的 assignee 改给人类 member** → 平台停止自动唤醒（member assignee 不触发 child-done 唤醒）→ 人评审 prd/business-test-cases → 设 `frozen_spec`(--type bool)+`frozen_test_cases` → 把 assignee 改回队长 agent → 队长被唤醒推进阶段 3。不建 child issue、不占 stage 编号。
+> **★ Spec Freeze 不是 `--stage`。** Multica 的 `--stage` 是整数（`issue.stage` Int32），没有 2.5。Spec Freeze 的平台原生落法：阶段 2 闭合后，队长把 **parent 状态改为 `in_review` + assignee 改给人类 member** → 平台停止自动唤醒（member assignee 不触发 child-done 唤醒）+ issue 列表显示「等人审核」→ 人评审 prd/business-test-cases → 设 `frozen_spec`(--type bool)+`frozen_test_cases` → 把 assignee 改回队长 agent → assignee 变化触发 `RunSourceAssign` 唤醒队长推进阶段 3。不建 child issue、不占 stage 编号。
 >
 > **为什么 baseline 要 `--exclude api`、api 单独一个门禁**：`baseline.py` 一次跑完 test-plan 所有命令，若不排除 api，阶段 4 和阶段 5 会重复跑同一批 api 测试。拆开后阶段 4 的 `diff.json` 只反映 unit/integration 的新增失败，阶段 5 的 `api-diff.json` 独立反映 api 的新增失败（B−A），证据互不污染。
 >
@@ -67,7 +67,7 @@
 | 3 基线门禁 | 门禁执行器 | baseline.py snapshot --phase after + diff（硬，跑全部 test-plan 命令） |
 | 4 代码审查 | 代码审查员 | soft gate |
 
-> bugfix 的验收：阶段 4 审查 pass 后，把 parent assignee 改给人类 member（同 Spec Freeze 的 member-暂停机制），不占额外 stage。
+> bugfix 的验收：阶段 4 审查 pass 后，把 parent 挪到 `in_review` 并改给人类 member（同 Spec Freeze 的 `in_review` + member-暂停机制），不占额外 stage。
 
 ---
 
@@ -111,7 +111,7 @@
 | 实现员 | 写代码+单测+技术测试用例 | 改 prd/design/business-test-cases、碰 issue 状态 |
 | 代码审查员 | 读 diff 写审查结论（只评不改） | 改代码 |
 | 门禁执行器 | 跑脚本拿**事实** + 对失败逐条做**处置判断**(fatal 阻断 / flaky 重试 / 历史 warn) + 跑**语义门禁**(PRD 质量 / 范围溢出 / 对抗审查)；事实不可推翻 | 写代码、改制品、把 fatal 洗成 pass |
-| **人类 approver**（squad member: type=member, role=approver） | Spec Freeze 评审 prd+business-test-cases、阶段 7 验收、熔断兜底。机制：队长把 parent assignee 改给 approver → `issue_child_done.go` 不触发屏障唤醒 → 暂停等人 | 写代码、跑门禁、自推进 issue 状态 |
+| **人类 approver**（squad member: type=member, role=approver） | Spec Freeze 评审 prd+business-test-cases、阶段 7 验收、熔断兜底。机制：队长把 parent 改为 `in_review` + assignee 改给 approver → 平台停止自动唤醒 + issue 列表显示「等人审核」→ 人审完把 assignee 改回队长 agent → `RunSourceAssign` 自动唤醒 | 写代码、跑门禁、自推进 issue 状态 |
 
 > 人类 approver 是 squad 第 6 成员（前 5 是 agent）。加入：`multica squad member add <squad> --member-id <user_id> --type member --role approver`（member-id 用 **user_id**，不是 workspace member id）。
 
