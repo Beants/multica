@@ -44,9 +44,18 @@ harness/
 
 ## 快速开始
 
+### 0. 前置条件
+
+```bash
+# 安装 multica CLI 并登录
+multica login
+multica workspace switch  # 选目标 workspace
+```
+
 ### 1. 在 Multica 上创建小队
 
-在 [Multica](https://multica.ai) 上创建 1 个 squad + 5 个 agent：\n
+在 [Multica](https://multica.ai) 上创建 1 个 squad + 5 个 agent：
+
 | Agent | CLI | 职责 |
 |---|---|---|
 | 队长-Leader | Hermes / Claude | 调度编排 |
@@ -55,6 +64,36 @@ harness/
 | 门禁执行器-GateRunner | 任意最省的 | 跑脚本 |
 | 代码审查员-Reviewer | Claude / OpenCode | 读 diff 写 verdict |
 
+```bash
+# 创建 squad
+multica squad create --name "harness-squad"
+
+# 创建 5 个 agent（名字必须含英文 role 关键词，sync_agents.py 靠模糊匹配）
+multica agent create --name "队长-Leader" --runtime <runtime-id>
+multica agent create --name "规划员-Planner" --runtime <runtime-id>
+multica agent create --name "实现员-Implementer" --runtime <runtime-id>
+multica agent create --name "门禁执行器-GateRunner" --runtime <runtime-id>
+multica agent create --name "代码审查员-Reviewer" --runtime <runtime-id>
+
+# 把 agent 加入 squad
+multica squad member add <squad-id> --agent-id <agent-id>
+```
+
+> Agent 名字必须含英文关键词（leader/planner/implementer/reviewer/gate-runner），`sync_agents.py` 靠这个名字做模糊匹配。
+
+### 2. 同步 instructions + 注册 skill
+
+```bash
+# 2a. 同步社区方法论 skill（从 obra/superpowers 拉取）
+python3 harness/cli/sync_skills.py sync
+
+# 2b. 注册所有 skill 到 multica workspace（社区 skill + 自造 harness-gates）
+python3 harness/cli/register_skills.py --profile desktop-api.multica.ai
+
+# 2c. 同步 squad instructions + agent instructions（分离，不拼接）
+python3 harness/cli/sync_agents.py --profile desktop-api.multica.ai --squad-id <squad-id>
+```
+
 **Instructions 分离**（关键）：
 
 - **Squad instructions** ← `squad-briefing.md`（全队共识：平台触发机制、流水线、角色、交接、门禁）
@@ -62,9 +101,18 @@ harness/
 
 Multica 平台会在 task dispatch 时分别注入 squad instructions 和 agent instructions，不要把全队共识复制进每个 agent。
 
+### 3. 绑定 skill 到 agent
+
+`register_skills.py` 会打印 skill → role 映射。在 Multica UI 或 CLI 把 skill bind 到对应 agent：
+
+```bash
+# 示例：把 harness-gates skill 绑到门禁执行器
+multica agent skill add <gate-runner-agent-id> --skill-id <harness-gates-skill-id>
+```
+
 **门禁脚本**：打包成 `harness-gates` skill（`skills/gate-runner/harness-gates/` 下含 SKILL.md + `gates/` 13 个脚本），绑到门禁执行器 agent。task dispatch 时 daemon 自动把脚本写进 workdir 的 `.claude/skills/harness-gates/gates/`，不需要项目 repo 自带。门禁执行器 prompt 里用 `GATES_DIR` 变量动态定位。
 
-### 2. 挂载 local_directory
+### 4. 挂载 local_directory
 
 ```bash
 multica project create my-project
@@ -74,7 +122,7 @@ multica project resource add my-project --type local_directory \
 
 > 门禁脚本不需要在项目 repo 里。`harness-gates` skill 绑在门禁执行器 agent 上，每次 task dispatch 时 daemon 自动注入 workdir。
 
-### 3. 发起一个需求
+### 5. 发起一个需求
 
 先拿到队长 agent 的 UUID，再用 `--assignee-id`（避免 fuzzy 中文名解析错路由）：
 

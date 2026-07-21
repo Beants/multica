@@ -69,6 +69,9 @@ def do_sync() -> int:
         name = entry["name"]
         repo = entry["repo"]
         role = entry["role"]
+        if not repo:
+            print(f"  skip   {role}/{name}: 自造 skill (repo=null)，不走社区同步")
+            continue
         try:
             sha = resolve_ref(repo, entry.get("ref", "HEAD"))
             dest_dir = SKILLS_DIR / role / name
@@ -113,6 +116,9 @@ def do_check() -> int:
         repo = entry["repo"]
         pinned = entry.get("pinned")
         label = f"{entry['role']}/{name}"
+        if not repo:
+            print(f"  skip    {label}: 自造 skill (repo=null)，无上游")
+            continue
         if not pinned:
             stale.append(f"{label}: never synced")
             continue
