@@ -42,6 +42,7 @@
     "new_issue": "새 이슈",
     "new_issue_shortcut": "C",
     "pinned_label": "고정됨",
+    "workflow_group": "Workflow",
     "workspace_group": "워크스페이스",
     "configure_group": "설정",
     "unread_overflow": "99+",
