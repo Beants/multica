@@ -12,6 +12,7 @@ export const workflowKeys = {
     [...workflowKeys.all(wsId), "runs", id] as const,
   diagnosis: (wsId: string, id: string) =>
     [...workflowKeys.run(wsId, id), "diagnosis"] as const,
+  rules: (wsId: string) => [...workflowKeys.all(wsId), "rules"] as const,
 };
 
 export function workflowTemplateListOptions(wsId: string) {
@@ -54,5 +55,13 @@ export function workflowRunDiagnosisOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: workflowKeys.diagnosis(wsId, id),
     queryFn: () => api.getRunDiagnosis(id),
+  });
+}
+
+// P1-fe-2: Rules asset list (workspace-scoped).
+export function workflowRuleListOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workflowKeys.rules(wsId),
+    queryFn: () => api.listWorkflowRules(),
   });
 }

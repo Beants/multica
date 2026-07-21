@@ -4,6 +4,8 @@ import { useWorkspaceId } from "../hooks";
 import { workflowKeys } from "./queries";
 import type {
   CreateWorkflowHookRequest,
+  CreateWorkflowRuleBindingRequest,
+  CreateWorkflowRuleRequest,
   CreateWorkflowTemplateRequest,
   RejectAcceptanceRequest,
   UpdateWorkflowTemplateRequest,
@@ -104,6 +106,55 @@ export function useRejectAcceptance() {
     onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: workflowKeys.run(wsId, vars.runId) });
       qc.invalidateQueries({ queryKey: workflowKeys.runs(wsId) });
+    },
+  });
+}
+
+// P1-fe-2: Rules asset mutations. Rule + binding writes invalidate the rule
+// list; binding writes also touch the per-rule binding list (not yet queried
+// client-side, but invalidated for forward-compat).
+export function useCreateWorkflowRule() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data: CreateWorkflowRuleRequest) => api.createWorkflowRule(data),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: workflowKeys.rules(wsId) });
+    },
+  });
+}
+
+export function useDeleteWorkflowRule() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteWorkflowRule(id),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: workflowKeys.rules(wsId) });
+    },
+  });
+}
+
+export function useCreateWorkflowRuleBinding() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ ruleId, ...data }: { ruleId: string } & CreateWorkflowRuleBindingRequest) =>
+      api.createWorkflowRuleBinding(ruleId, data),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: workflowKeys.rules(wsId) });
+    },
+  });
+}
+
+export function useDeleteWorkflowRuleBinding() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ ruleId, bindingId }: { ruleId: string; bindingId: string }) =>
+      api.deleteWorkflowRuleBinding(ruleId, bindingId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: workflowKeys.rules(wsId) });
     },
   });
 }

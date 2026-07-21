@@ -165,6 +165,10 @@ import type {
   WorkflowRun,
   WorkflowRunDetail,
   RunDiagnosis,
+  WorkflowRule,
+  WorkflowRuleBinding,
+  CreateWorkflowRuleRequest,
+  CreateWorkflowRuleBindingRequest,
   WorkflowTemplate,
   WorkflowTemplateDetail,
 } from "../workflows/types";
@@ -177,6 +181,10 @@ import {
   EMPTY_WORKFLOW_HOOK_LIST,
   EMPTY_WORKFLOW_RUN_DETAIL,
   EMPTY_RUN_DIAGNOSIS,
+  EMPTY_WORKFLOW_RULE,
+  EMPTY_WORKFLOW_RULE_LIST,
+  EMPTY_WORKFLOW_RULE_BINDING,
+  EMPTY_WORKFLOW_RULE_BINDING_LIST,
   EMPTY_WORKFLOW_RUN_LIST,
   EMPTY_WORKFLOW_TEMPLATE,
   EMPTY_WORKFLOW_TEMPLATE_DETAIL,
@@ -185,6 +193,10 @@ import {
   WorkflowHookSchema,
   WorkflowRunDetailSchema,
   RunDiagnosisSchema,
+  WorkflowRuleSchema,
+  WorkflowRuleListSchema,
+  WorkflowRuleBindingSchema,
+  WorkflowRuleBindingListSchema,
   WorkflowRunListSchema,
   WorkflowTemplateDetailSchema,
   WorkflowTemplateListSchema,
@@ -2885,6 +2897,52 @@ export class ApiClient {
     return parseWithFallback(raw, WorkflowHookSchema, EMPTY_WORKFLOW_HOOK, {
       endpoint: "POST /api/workflow-hooks/:id/disable",
     });
+  }
+
+  // P1-fe-2: Rules asset CRUD (P1-4 API).
+  async listWorkflowRules(): Promise<WorkflowRule[]> {
+    const raw = await this.fetch<unknown>(`/api/workflow-rules`);
+    return parseWithFallback(raw, WorkflowRuleListSchema, EMPTY_WORKFLOW_RULE_LIST, {
+      endpoint: "GET /api/workflow-rules",
+    });
+  }
+
+  async createWorkflowRule(data: CreateWorkflowRuleRequest): Promise<WorkflowRule> {
+    const raw = await this.fetch<unknown>(`/api/workflow-rules`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, WorkflowRuleSchema, EMPTY_WORKFLOW_RULE, {
+      endpoint: "POST /api/workflow-rules",
+    });
+  }
+
+  async deleteWorkflowRule(id: string): Promise<void> {
+    await this.fetch(`/api/workflow-rules/${id}`, { method: "DELETE" });
+  }
+
+  async listWorkflowRuleBindings(ruleId: string): Promise<WorkflowRuleBinding[]> {
+    const raw = await this.fetch<unknown>(`/api/workflow-rules/${ruleId}/bindings`);
+    return parseWithFallback(raw, WorkflowRuleBindingListSchema, EMPTY_WORKFLOW_RULE_BINDING_LIST, {
+      endpoint: "GET /api/workflow-rules/:id/bindings",
+    });
+  }
+
+  async createWorkflowRuleBinding(
+    ruleId: string,
+    data: CreateWorkflowRuleBindingRequest,
+  ): Promise<WorkflowRuleBinding> {
+    const raw = await this.fetch<unknown>(`/api/workflow-rules/${ruleId}/bindings`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, WorkflowRuleBindingSchema, EMPTY_WORKFLOW_RULE_BINDING, {
+      endpoint: "POST /api/workflow-rules/:id/bindings",
+    });
+  }
+
+  async deleteWorkflowRuleBinding(ruleId: string, bindingId: string): Promise<void> {
+    await this.fetch(`/api/workflow-rules/${ruleId}/bindings/${bindingId}`, { method: "DELETE" });
   }
 
   async listWorkflowRuns(): Promise<WorkflowRun[]> {

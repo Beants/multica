@@ -16,6 +16,8 @@ import type {
   WorkflowTemplate,
   WorkflowTemplateDetail,
   RunDiagnosis,
+  WorkflowRule,
+  WorkflowRuleBinding,
 } from "./types";
 
 // A JSONB blob that must be an object when present (config, exit_fields,
@@ -166,6 +168,66 @@ export const EMPTY_CREATE_WORKFLOW_HOOK_RESPONSE: CreateWorkflowHookResponse = {
   last_used_at: null,
   created_at: "",
   token: "",
+};
+
+// P1-fe-2: Rules asset schemas. level/scope/target_type/enforcement stay
+// z.string() (D-9) so a new server enum renders as a generic row instead of
+// failing safeParse.
+export const WorkflowRuleSchema = z
+  .object({
+    id: z.string(),
+    workspace_id: z.string().optional().default(""),
+    name: z.string(),
+    level: z.string().optional().default("soft"),
+    scope: z.string().optional().default("workspace"),
+    content: z.string().optional().default(""),
+    config: jsonAny,
+    status: z.string().optional().default("active"),
+    version: z.number().optional().default(1),
+    created_at: z.string().optional().default(""),
+    updated_at: z.string().optional().default(""),
+  })
+  .loose();
+
+export const WorkflowRuleListSchema = z.array(WorkflowRuleSchema).default([]);
+
+export const EMPTY_WORKFLOW_RULE_LIST: WorkflowRule[] = [];
+
+export const EMPTY_WORKFLOW_RULE: WorkflowRule = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  level: "soft",
+  scope: "workspace",
+  content: "",
+  status: "active",
+  version: 1,
+  created_at: "",
+  updated_at: "",
+};
+
+export const WorkflowRuleBindingSchema = z
+  .object({
+    id: z.string(),
+    rule_id: z.string().optional().default(""),
+    target_type: z.string().optional().default("agent"),
+    target_id: z.string().optional().default(""),
+    enforcement: z.string().optional().default("context_inject"),
+    created_at: z.string().optional().default(""),
+  })
+  .loose();
+
+export const WorkflowRuleBindingListSchema = z.array(WorkflowRuleBindingSchema).default([]);
+
+export const EMPTY_WORKFLOW_RULE_BINDING_LIST: WorkflowRuleBinding[] = [];
+
+export const EMPTY_WORKFLOW_RULE_BINDING: WorkflowRuleBinding = {
+  id: "",
+  rule_id: "",
+  target_type: "agent",
+  target_id: "",
+  enforcement: "context_inject",
+  created_at: "",
 };
 
 // ---------------------------------------------------------------------------
