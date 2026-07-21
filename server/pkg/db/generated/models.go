@@ -790,6 +790,28 @@ type NotificationPreference struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type OutboundDelivery struct {
+	ID           pgtype.UUID        `json:"id"`
+	WebhookID    pgtype.UUID        `json:"webhook_id"`
+	EventID      pgtype.UUID        `json:"event_id"`
+	Status       string             `json:"status"`
+	Attempts     int32              `json:"attempts"`
+	ResponseCode pgtype.Int4        `json:"response_code"`
+	DeliveredAt  pgtype.Timestamptz `json:"delivered_at"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type OutboundWebhook struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Url         string             `json:"url"`
+	Secret      string             `json:"secret"`
+	EventTypes  []string           `json:"event_types"`
+	Active      bool               `json:"active"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type PersonalAccessToken struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`

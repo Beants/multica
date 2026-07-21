@@ -31,15 +31,20 @@ func registerEventStoreListener(bus *events.Bus, queries *db.Queries) {
 		}
 		wsID, _ := util.ParseUUID(e.WorkspaceID)
 		actorID, _ := util.ParseUUID(e.ActorID)
-		if _, err := queries.InsertEvent(context.Background(), db.InsertEventParams{
+		ev, err := queries.InsertEvent(context.Background(), db.InsertEventParams{
 			WorkspaceID: wsID,
 			EventType:   e.Type,
 			ActorType:   pgtype.Text{String: e.ActorType, Valid: e.ActorType != ""},
 			ActorID:     actorID,
 			Payload:     payload,
 			DedupKey:    eventDedupKey(e.Type, e.WorkspaceID, e.ActorType, e.ActorID, payload),
-		}); err != nil {
+		})
+		if err != nil {
 			slog.Warn("event_store: insert failed", "type", e.Type, "error", err)
+		} else {
+			// P2-2: fan out to outbound webhooks (goroutine-ized internally —
+			// never blocks the bus on a slow external endpoint).
+			go deliverEventToWebhooks(queries, ev)
 		}
 	})
 }
