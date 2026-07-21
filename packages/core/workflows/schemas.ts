@@ -19,6 +19,7 @@ import type {
   WorkflowRule,
   WorkflowRuleBinding,
   AgentCapability,
+  EventStoreRow,
 } from "./types";
 
 // A JSONB blob that must be an object when present (config, exit_fields,
@@ -256,6 +257,32 @@ export const EMPTY_AGENT_CAPABILITY: AgentCapability = {
   created_at: "",
   updated_at: "",
 };
+
+// P2-4: dashboard read schemas.
+export const EventStoreRowSchema = z
+  .object({
+    id: z.string(),
+    workspace_id: z.string().optional(),
+    event_type: z.string(),
+    actor_type: z.string().optional(),
+    actor_id: z.string().optional(),
+    payload: jsonAny,
+    occurred_at: z.string().optional().default(""),
+  })
+  .loose();
+
+export const EventStoreRowListSchema = z.array(EventStoreRowSchema).default([]);
+
+export const EMPTY_EVENT_STORE_ROW_LIST: EventStoreRow[] = [];
+
+export const MetricRowSchema = z
+  .object({
+    event_type: z.string(),
+    event_count: z.number().optional().default(0),
+  })
+  .loose();
+
+export const MetricRowListSchema = z.array(MetricRowSchema).default([]);
 
 // ---------------------------------------------------------------------------
 // Runs

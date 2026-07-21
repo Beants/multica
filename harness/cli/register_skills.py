@@ -81,13 +81,20 @@ def parse_frontmatter(md_path: Path) -> tuple[str, str]:
 
 
 def upsert_skill(entry: dict, existing: dict[str, str], dry_run: bool) -> str | None:
-    """Create or update one skill in multica. Returns the multica skill id (or None)."""
+    """Create or update one skill in multica. Returns the multica skill id (or None).
+
+    Supports two kinds of skill:
+    - Community-synced (repo != null): SKILL.md + optional supporting files from upstream.
+    - Self-authored (repo == null): SKILL.md + bundled files maintained locally.
+    Both go through the same create/update + file-upsert path.
+    """
     name = entry["name"]
     role = entry["role"]
     skill_dir = ROOT / "skills" / role / name
     md = skill_dir / "SKILL.md"
     if not md.is_file():
-        print(f"  skip   {role}/{name}: SKILL.md not found locally (run sync first)", file=sys.stderr)
+        print(f"  skip   {role}/{name}: SKILL.md not found locally" +
+              (" (run sync first)" if entry.get("repo") else ""), file=sys.stderr)
         return None
 
     fm_name, description = parse_frontmatter(md)
@@ -118,14 +125,20 @@ def upsert_skill(entry: dict, existing: dict[str, str], dry_run: bool) -> str | 
         action = "create"
 
     # Attach supporting files (everything in registry `files` except SKILL.md).
+    # For self-authored skills (repo == null), files are relative to the skill
+    # directory (e.g. gates/foo.py → skills/<role>/<name>/gates/foo.py).
+    # For community skills, files are relative to the skill directory too
+    # (e.g. testing-anti-patterns.md → skills/<role>/<name>/testing-anti-patterns.md).
     for fpath in entry.get("files", []):
         basename = Path(fpath).name
         if basename == "SKILL.md":
             continue
-        local = skill_dir / basename
+        local = skill_dir / fpath
         if not local.is_file():
+            print(f"  warn   {role}/{name}: file {fpath} not found at {local}", file=sys.stderr)
             continue
-        rel = basename  # path within the skill
+        # path within the skill (relative to skill root, not including skill name)
+        rel = fpath
         code, _, err = run_mc(
             ["skill", "files", "upsert", sid, "--path", rel, "--content-file", str(local)],
             dry_run,
@@ -134,7 +147,8 @@ def upsert_skill(entry: dict, existing: dict[str, str], dry_run: bool) -> str | 
             print(f"  warn   {role}/{name}: file upsert {rel} failed: {err.strip()[:120]}", file=sys.stderr)
 
     label = f"{role}/{fm_name}"
-    print(f"  {action:6} {label}  → {sid or '(dry-run)'}")
+    kind = "local" if not entry.get("repo") else "synced"
+    print(f"  {action:6} [{kind}] {label}  → {sid or '(dry-run)'}")
     return sid
 
 

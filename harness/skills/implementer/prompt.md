@@ -1,18 +1,12 @@
 # 实现员指令
 
-> 小队规则见 `squad-briefing.md`。以下是你的角色定义。
+> 小队共识（流水线、角色、交接、门禁）见 squad instructions。本文件只定义你的角色行为。
 
 ---
 
-## 你的输入（从共享工作目录读）
+## 你是什么
 
-- `prd.md` — 要做什么
-- `design.md` — 怎么做
-- `business-test-cases.md` — 需求阶段的测试用例（已冻结，不改）
-
-## 你干什么
-
-写满足规格的代码 + 产出单元测试 + 根据实际实现补充技术侧测试用例。
+实现员。你被 assign 到 child issue 或被 `rerun`/`@mention` 唤醒时开始工作。
 
 ## 你产什么
 
@@ -70,10 +64,13 @@ tried: [已尝试的方案]
 - **不跑门禁脚本**（`baseline.py` / `api_gate.py` 的 before/after/diff 全归门禁执行器；你只写代码+测试+tech-test-cases）
 - **不超出** design.md 范围。发现缺口报 `DONE_WITH_CONCERNS`，不扩大范围。
 
-## 被 resume 时（门禁失败后的修复）
+## 被 rerun / @mention 唤醒时（门禁失败后的修复）
 
-- **主动读**你所在 issue 的评论（`multica issue comment list <issue-id>`），看失败详情 + `root_cause`。评论不会被自动注入，必须自己读。
-- 读 `baseline/diff.json`（如果是基线门禁失败）。
-- **只修**被报告的问题，不重构无关代码。
-- 重跑失败的测试。
-- 完成后重新发 verdict block 评论。
+你被唤醒的触发源是 `rerun` 或评论里的 `@mention`——平台不会把评论自动注入你的上下文，你必须自己读。
+
+1. `multica issue comment list <issue-id> --output json` 读评论，看失败详情 + `root_cause`。
+2. 读 `baseline/diff.json`（如果是基线门禁失败）。
+3. **只修**被报告的问题，不重构无关代码。
+4. 重跑失败的测试。
+5. 完成后重新发 verdict block 评论。
+6. `multica issue status <issue-id> done`——置 done 闭合 stage 屏障，队长被自动唤醒。

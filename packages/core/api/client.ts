@@ -171,6 +171,8 @@ import type {
   CreateWorkflowRuleBindingRequest,
   AgentCapability,
   CreateAgentCapabilityRequest,
+  EventStoreRow,
+  MetricRow,
   WorkflowTemplate,
   WorkflowTemplateDetail,
 } from "../workflows/types";
@@ -189,6 +191,7 @@ import {
   EMPTY_WORKFLOW_RULE_BINDING_LIST,
   EMPTY_AGENT_CAPABILITY,
   EMPTY_AGENT_CAPABILITY_LIST,
+  EMPTY_EVENT_STORE_ROW_LIST,
   EMPTY_WORKFLOW_RUN_LIST,
   EMPTY_WORKFLOW_TEMPLATE,
   EMPTY_WORKFLOW_TEMPLATE_DETAIL,
@@ -203,6 +206,8 @@ import {
   WorkflowRuleBindingListSchema,
   AgentCapabilitySchema,
   AgentCapabilityListSchema,
+  EventStoreRowListSchema,
+  MetricRowListSchema,
   WorkflowRunListSchema,
   WorkflowTemplateDetailSchema,
   WorkflowTemplateListSchema,
@@ -2971,6 +2976,21 @@ export class ApiClient {
 
   async deleteAgentCapability(agentId: string, capId: string): Promise<void> {
     await this.fetch(`/api/agents/${agentId}/capabilities/${capId}`, { method: "DELETE" });
+  }
+
+  // P2-4: dashboard reads (event_store feed + aggregated metrics).
+  async listWorkflowEvents(): Promise<EventStoreRow[]> {
+    const raw = await this.fetch<unknown>(`/api/workflow-events`);
+    return parseWithFallback(raw, EventStoreRowListSchema, EMPTY_EVENT_STORE_ROW_LIST, {
+      endpoint: "GET /api/workflow-events",
+    });
+  }
+
+  async listWorkflowMetrics(): Promise<MetricRow[]> {
+    const raw = await this.fetch<unknown>(`/api/workflow-metrics`);
+    return parseWithFallback(raw, MetricRowListSchema, [], {
+      endpoint: "GET /api/workflow-metrics",
+    });
   }
 
   async listWorkflowRuns(): Promise<WorkflowRun[]> {

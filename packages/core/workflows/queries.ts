@@ -15,6 +15,8 @@ export const workflowKeys = {
   rules: (wsId: string) => [...workflowKeys.all(wsId), "rules"] as const,
   agentCapabilities: (wsId: string, agentId: string) =>
     [...workflowKeys.all(wsId), "agents", agentId, "capabilities"] as const,
+  metrics: (wsId: string) => [...workflowKeys.all(wsId), "metrics"] as const,
+  events: (wsId: string) => [...workflowKeys.all(wsId), "events"] as const,
 };
 
 export function workflowTemplateListOptions(wsId: string) {
@@ -73,5 +75,20 @@ export function agentCapabilityListOptions(wsId: string, agentId: string) {
   return queryOptions({
     queryKey: workflowKeys.agentCapabilities(wsId, agentId),
     queryFn: () => api.listAgentCapabilities(agentId),
+  });
+}
+
+// P2-4: dashboard reads.
+export function workflowMetricsOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workflowKeys.metrics(wsId),
+    queryFn: () => api.listWorkflowMetrics(),
+  });
+}
+
+export function workflowEventsOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workflowKeys.events(wsId),
+    queryFn: () => api.listWorkflowEvents(),
   });
 }
