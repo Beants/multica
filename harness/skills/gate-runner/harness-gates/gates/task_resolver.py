@@ -22,6 +22,52 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# ── Harness artifact directory layout ──────────────────────────────
+# All harness artifacts live under <workdir>/.harness/ to keep them
+# separate from the project's own source tree.
+HARNESS_DIRNAME = ".harness"
+SPECS_DIRNAME = "specs"
+REVIEW_DIRNAME = "review"
+EVIDENCE_DIRNAME = "evidence"
+BASELINE_DIRNAME = "baseline"
+
+
+def harness_root(task_dir: Path) -> Path:
+    """Return <task_dir>/.harness (does not create it)."""
+    return task_dir / HARNESS_DIRNAME
+
+
+def specs_dir(task_dir: Path) -> Path:
+    """Return <task_dir>/.harness/specs (AI planning artifacts)."""
+    return harness_root(task_dir) / SPECS_DIRNAME
+
+
+def review_dir(task_dir: Path) -> Path:
+    """Return <task_dir>/.harness/review (review artifacts)."""
+    return harness_root(task_dir) / REVIEW_DIRNAME
+
+
+def evidence_dir(task_dir: Path) -> Path:
+    """Return <task_dir>/.harness/evidence (script-managed evidence)."""
+    return harness_root(task_dir) / EVIDENCE_DIRNAME
+
+
+def baseline_dir(task_dir: Path) -> Path:
+    """Return <task_dir>/.harness/evidence/baseline (test snapshots)."""
+    return evidence_dir(task_dir) / BASELINE_DIRNAME
+
+
+def test_plan_path(task_dir: Path) -> Path:
+    """Return <task_dir>/.harness/test-plan.json."""
+    return harness_root(task_dir) / "test-plan.json"
+
+
+def ensure_harness_dirs(task_dir: Path) -> None:
+    """Create .harness/{specs,review,evidence/baseline} if missing."""
+    for d in (specs_dir(task_dir), review_dir(task_dir),
+              baseline_dir(task_dir)):
+        d.mkdir(parents=True, exist_ok=True)
+
 
 def _detect_tasks_dir(start: Path | None = None) -> Path:
     """Walk up from *start* (default CWD) to find ``.trellis/tasks/``."""

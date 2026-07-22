@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import task_resolver
+from task_resolver import specs_dir as _specs_dir
 
 REQUIRED_PRD_SECTIONS = [
     ("problem", re.compile(r"^##\s+.*problem", re.IGNORECASE | re.MULTILINE)),
@@ -37,14 +38,22 @@ OBSERVABLE_AC_PATTERN = re.compile(r"^\s*-\s*\[[ x]\]\s+", re.MULTILINE)
 
 
 def check_task(task_dir: Path) -> dict:
-    prd_path = task_dir / "prd.md"
-    design_path = task_dir / "design.md"
-    implement_path = task_dir / "implement.md"
+    sdir = _specs_dir(task_dir)
+    prd_path = sdir / "prd.md"
+    design_path = sdir / "design.md"
+    implement_path = sdir / "implement.md"
 
     passed = []
     warnings = []
     failed = []
 
+    # Fallback: check workdir root for backward compat
+    if not prd_path.exists():
+        prd_path = task_dir / "prd.md"
+    if not design_path.exists():
+        design_path = task_dir / "design.md"
+    if not implement_path.exists():
+        implement_path = task_dir / "implement.md"
     if not prd_path.exists():
         failed.append("prd.md missing")
         return {"schema": 1, "task": task_dir.name, "passed": passed, "warnings": warnings, "failed": failed}

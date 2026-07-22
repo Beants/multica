@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import task_resolver
+from task_resolver import baseline_dir as _baseline_dir
 
 SCHEMA_VERSION = 1
 DEFAULT_COMMANDS = ("lint", "typecheck", "test")
@@ -147,14 +148,14 @@ def snapshot(
     if_missing: bool = False,
     command_templates: dict[str, str] | None = None,
 ) -> Path:
-    """Run each command, capture results, write <task-dir>/baseline/<phase>.json."""
+    """Run each command, capture results, write <task>/.harness/evidence/baseline/<phase>.json."""
     task_name = task_dir.name
-    baseline_dir = task_dir / "baseline"
-    target = baseline_dir / f"{phase}.json"
+    bdir = _baseline_dir(task_dir)
+    target = bdir / f"{phase}.json"
     if if_missing and target.is_file():
         return target
 
-    baseline_dir.mkdir(parents=True, exist_ok=True)
+    bdir.mkdir(parents=True, exist_ok=True)
 
     cmd_results: dict[str, dict] = {}
     for key in commands:
@@ -221,8 +222,8 @@ def compute_diff(
     return {
         "schema": SCHEMA_VERSION,
         "task": task,
-        "before": "baseline/before.json",
-        "after": "baseline/after.json",
+        "before": ".harness/evidence/baseline/before.json",
+        "after": ".harness/evidence/baseline/after.json",
         "new_failures": new_failures,
         "known_failures": known_failures,
         "resolved_failures": resolved_failures,
@@ -234,18 +235,18 @@ def diff(
     *,
     task_dir: Path,
 ) -> tuple[Path, dict]:
-    """Read baseline/{before,after}.json, compute + write diff.json. Return (path, payload)."""
+    """Read .harness/evidence/baseline/{before,after}.json, compute + write diff.json. Return (path, payload)."""
     task_name = task_dir.name
-    base = task_dir / "baseline"
+    base = _baseline_dir(task_dir)
     before_path = base / "before.json"
     after_path = base / "after.json"
     if not before_path.exists():
         raise FileNotFoundError(
-            f"missing baseline/before.json at {before_path}. Run `snapshot --phase before` first."
+            f"missing .harness/evidence/baseline/before.json at {before_path}. Run `snapshot --phase before` first."
         )
     if not after_path.exists():
         raise FileNotFoundError(
-            f"missing baseline/after.json at {after_path}. Run `snapshot --phase after` first."
+            f"missing .harness/evidence/baseline/after.json at {after_path}. Run `snapshot --phase after` first."
         )
 
     before = json.loads(before_path.read_text(encoding="utf-8"))
@@ -295,7 +296,14 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
     command_templates: dict[str, str] | None = None
 
     # Project test-plan wins (real test stack), then --commands, then pnpm default.
-    plan_path = Path(args.test_plan) if args.test_plan else (cwd / "test-plan.json")
+    # Check .harness/test-plan.json first, fallback to workdir root.
+    from task_resolver import test_plan_path as _test_plan_path
+    if args.test_plan:
+        plan_path = Path(args.test_plan)
+    else:
+        plan_path = _test_plan_path(cwd)
+        if not plan_path.is_file():
+            plan_path = cwd / "test-plan.json"  # fallback: legacy location
     tp = load_test_plan(plan_path)
     if tp:
         commands, command_templates = tp
@@ -324,7 +332,7 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
             if not commands:
                 print("error: --exclude removed every command", file=sys.stderr)
                 return 2
-    target_before = task_dir / "baseline" / f"{args.phase}.json"
+    target_before = _baseline_dir(task_dir) / f"{args.phase}.json"
     kept_existing = args.if_missing and target_before.is_file()
     try:
         target = snapshot(

@@ -48,6 +48,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import baseline  # sibling import (same dir on sys.path[0]); reuse its primitives
+from task_resolver import baseline_dir as _baseline_dir
 import task_resolver
 
 API_KEY = "api"
@@ -62,7 +63,12 @@ def _api_spec(cwd: Path, test_plan: str | None) -> tuple[str, str] | None:
 
     None means 'no api test configured for this project' — a legitimate skip.
     """
-    plan_path = Path(test_plan) if test_plan else (cwd / "test-plan.json")
+    plan_path = Path(test_plan) if test_plan else None
+    if plan_path is None:
+        from task_resolver import test_plan_path as _test_plan_path
+        plan_path = _test_plan_path(cwd)
+        if not plan_path.is_file():
+            plan_path = cwd / "test-plan.json"  # fallback: legacy location
     loaded = baseline.load_test_plan(plan_path)  # (commands, templates) or None
     if not loaded:
         return None
@@ -82,11 +88,11 @@ def snapshot(
 ) -> Path | None:
     """Run the api command, write baseline/api-<phase>.json. None = skipped."""
     key, shell_cmd = spec
-    target = task_dir / "baseline" / f"api-{phase}.json"
+    target = _baseline_dir(task_dir) / f"api-{phase}.json"
     if if_missing and target.is_file():
         return target
 
-    (task_dir / "baseline").mkdir(parents=True, exist_ok=True)
+    _baseline_dir(task_dir).mkdir(parents=True, exist_ok=True)
     exit_code, stdout, stderr, duration_ms = baseline.run_command(shell_cmd, cwd)
     failures = baseline.normalize_failures(API_KEY, stdout, stderr) if exit_code != 0 else []
     payload = {
@@ -108,7 +114,7 @@ def snapshot(
 
 def diff(*, task_dir: Path) -> tuple[Path, dict]:
     """Read api-before/api-after, compute + write api-diff.json. Return (path, payload)."""
-    base = task_dir / "baseline"
+    base = _baseline_dir(task_dir)
     before_path = base / "api-before.json"
     after_path = base / "api-after.json"
     if not before_path.exists():
@@ -143,7 +149,7 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
         # Legitimate skip: no api command configured. Non-blocking.
         print("SKIP: no 'api' command in test-plan.json — stage 5 not applicable to this project.")
         return 0
-    kept = args.if_missing and (task_dir / "baseline" / f"api-{args.phase}.json").is_file()
+    kept = args.if_missing and (_baseline_dir(task_dir) / f"api-{args.phase}.json").is_file()
     try:
         target = snapshot(task_dir=task_dir, phase=args.phase, cwd=cwd, spec=spec, if_missing=args.if_missing)
     except Exception as e:

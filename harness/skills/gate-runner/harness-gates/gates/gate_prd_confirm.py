@@ -25,12 +25,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import task_resolver
+from task_resolver import evidence_dir as _evidence_dir, specs_dir as _specs_dir
 
 TASK_JSON = "task.json"
 
 
 def _read_task_json(task_dir: Path) -> dict:
-    p = task_dir / TASK_JSON
+    p = _evidence_dir(task_dir) / TASK_JSON
+    if not p.is_file():
+        p = task_dir / TASK_JSON  # fallback
     if not p.is_file():
         print(f"Error: {p} not found", file=sys.stderr)
         sys.exit(1)
@@ -38,7 +41,9 @@ def _read_task_json(task_dir: Path) -> dict:
 
 
 def _write_task_json(task_dir: Path, data: dict) -> None:
-    p = task_dir / TASK_JSON
+    p = _evidence_dir(task_dir) / TASK_JSON
+    if not p.is_file():
+        p = task_dir / TASK_JSON  # fallback
     p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
@@ -101,7 +106,9 @@ def main() -> int:
         return 1
 
     # Show summary
-    prd_path = task_dir / "prd.md"
+    prd_path = _specs_dir(task_dir) / "prd.md"
+    if not prd_path.is_file():
+        prd_path = task_dir / "prd.md"  # fallback
     summary = _extract_summary(prd_path)
 
     print("=" * 60)

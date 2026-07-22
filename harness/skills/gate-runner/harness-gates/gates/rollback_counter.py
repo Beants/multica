@@ -26,19 +26,28 @@ from pathlib import Path
 
 import task_resolver
 
+import task_resolver
+from task_resolver import evidence_dir as _evidence_dir
+
 TASK_JSON = "task.json"
 DEFAULT_THRESHOLD = 3
 
 
 def _read_task_json(task_dir: Path) -> dict:
-    p = task_dir / TASK_JSON
+    p = _evidence_dir(task_dir) / TASK_JSON
+    if not p.is_file():
+        # Fallback: legacy location (workdir root) for backward compat
+        p = task_dir / TASK_JSON
     if not p.is_file():
         return {}
     return json.loads(p.read_text(encoding="utf-8"))
 
 
 def _write_task_json(task_dir: Path, data: dict) -> None:
-    p = task_dir / TASK_JSON
+    p = _evidence_dir(task_dir) / TASK_JSON
+    if not p.is_file():
+        # Fallback: legacy location
+        p = task_dir / TASK_JSON
     p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 

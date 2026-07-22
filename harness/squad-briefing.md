@@ -43,13 +43,13 @@
 
 | 阶段 | assignee | 门禁 | 产出物 |
 |---|---|---|---|
-| 1 规划 | 规划员 | — | prd.md, design.md, business-test-cases.md |
-| 2 规划门禁 | 门禁执行器 | plan_contract_check.py（硬）+ `baseline.py snapshot --phase before --exclude api`（冻结已知失败基线） | verdict, baseline/before.json |
-| ★ Spec Freeze | 人类（暂停，非编号 stage） | 评审 prd + business-test-cases | `frozen_spec=true` |
-| 3 实现 | 实现员 | — | 代码, tech-test-cases.md（**不碰 baseline 脚本**） |
-| 4 基线门禁 | 门禁执行器 | `baseline.py snapshot --phase after --exclude api` + `diff`（硬）—只跑 unit/integration/lint/typecheck | baseline/{after,diff}.json |
-| 5 API/接口门禁 | 门禁执行器 | `api_gate.py snapshot --phase after` + `diff`（硬）—只跑 test-plan 的 `api` 键；无 api 键则 SKIP | baseline/api-{after,diff}.json |
-| 6 代码审查 | 代码审查员 | soft gate（不阻断） | review-verdict.yaml |
+| 1 规划 | 规划员 | — | .harness/specs/prd.md, .harness/specs/design.md, .harness/specs/business-test-cases.md |
+| 2 规划门禁 | 门禁执行器 | plan_contract_check.py（硬）+ `baseline.py snapshot --phase before --exclude api`（冻结已知失败基线） | verdict, .harness/evidence/baseline/before.json |
+| ★ Spec Freeze | 人类（暂停，非编号 stage） | 评审 .harness/specs/ 下的 prd + business-test-cases | `frozen_spec=true` |
+| 3 实现 | 实现员 | — | 代码, .harness/specs/tech-test-cases.md（**不碰 baseline 脚本**） |
+| 4 基线门禁 | 门禁执行器 | `baseline.py snapshot --phase after --exclude api` + `diff`（硬）—只跑 unit/integration/lint/typecheck | .harness/evidence/baseline/{after,diff}.json |
+| 5 API/接口门禁 | 门禁执行器 | `api_gate.py snapshot --phase after` + `diff`（硬）—只跑 test-plan 的 `api` 键；无 api 键则 SKIP | .harness/evidence/baseline/api-{after,diff}.json |
+| 6 代码审查 | 代码审查员 | soft gate（不阻断） | .harness/review/review-verdict.yaml |
 | 7 验收 | 人类 | 验收 | done / 驳回 |
 
 > **★ Spec Freeze 不是 `--stage`。** Multica 的 `--stage` 是整数（`issue.stage` Int32），没有 2.5。Spec Freeze 的平台原生落法：阶段 2 闭合后，队长把 **parent 状态改为 `in_review` + assignee 改给人类 member** → 平台停止自动唤醒（member assignee 不触发 child-done 唤醒）+ issue 列表显示「等人审核」→ 人评审 prd/business-test-cases → 设 `frozen_spec`(--type bool)+`frozen_test_cases` → 把 assignee 改回队长 agent → assignee 变化触发 `RunSourceAssign` 唤醒队长推进阶段 3。不建 child issue、不占 stage 编号。
@@ -90,15 +90,39 @@
 
 > 为什么不用 `pipeline-state.yaml`？它会被 GC 清理（done issue 的 workdir 24h 删除）、无并发保护、且没有脚本读取。issue metadata 是 Multica 专门为 pipeline 状态设计的原子 KV。
 
-### 层 2：任务级证据（单 workdir 内）—— 走 task.json / gate-result.jsonl
+### 层 2：任务级证据（单 workdir 内）—— 走 `.harness/` 目录
 
-每个 child issue 对应一次 task 执行，有一个独立 workdir。任务内的证据由脚本管理：
+每个 child issue 对应一次 task 执行，有一个独立 workdir。任务内的证据由脚本管理，统一放在 workdir 的 `.harness/` 目录下：
 
-- `<workdir>/task.json` — 单任务状态（含 `meta.rollbacks`，熔断计数源）
-- `<workdir>/gate-result.jsonl` — 门禁事件流（append-only，`gate_result.py append` 写入）
-- `<workdir>/baseline/` — 测试快照 + diff
+```
+<workdir>/.harness/
+├── specs/                       ← AI 规划产物（规划员写）
+│   ├── prd.md
+│   ├── design.md
+│   ├── business-test-cases.md
+│   └── tech-test-cases.md       ← 实现员写
+├── review/                      ← 审查产物（审查员写）
+│   ├── review-verdict.yaml
+│   └── adversarial-verdict.yaml ← 门禁执行器写
+├── evidence/                    ← 脚本证据（门禁脚本写）
+│   ├── task.json                ← 单任务状态（含 meta.rollbacks，熔断计数源）
+│   ├── gate-result.jsonl        ← 门禁事件流（append-only）
+│   └── baseline/                ← 测试快照 + diff
+│       ├── before.json
+│       ├── after.json
+│       ├── diff.json
+│       ├── api-before.json
+│       ├── api-after.json
+│       └── api-diff.json
+└── test-plan.json               ← 测试配置（detect_tests.py 生成）
+```
 
-专家 agent 在 workdir 里**只写自己的制品文件**（prd.md 等），不碰 `task.json` 的全局字段；`task.json`/`gate-result.jsonl` 由门禁脚本和 `rollback_counter.py` 维护。
+- `.harness/specs/` — AI 制品，由规划员/实现员写入，下游只读
+- `.harness/review/` — 审查产物，由审查员/门禁执行器写入
+- `.harness/evidence/` — 脚本证据，由门禁脚本维护，AI 不手写
+- `.harness/test-plan.json` — 项目测试配置，由 `detect_tests.py` 生成
+
+> 脚本有 fallback 逻辑：如果 `.harness/` 下找不到文件，会回退到 workdir 根目录（向后兼容旧项目）。新项目一律用 `.harness/`。
 
 ---
 
@@ -127,7 +151,7 @@
 # 在 child issue 评论里，用 fenced block 发出（队长/下游靠这个解析）
 status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 verdict: pass | fail | blocked      # 流程裁定，决定队长下一步
-artifacts: [prd.md, design.md]       # 业务产物（相对 workdir 的路径）
+artifacts: [.harness/specs/prd.md, .harness/specs/design.md]  # 业务产物（.harness/ 下的路径）
 root_cause: ""                       # BLOCKED/fail 时必填
 confidence: high | medium | low
 gaps: []                             # 下游需注意的未覆盖点
@@ -137,7 +161,7 @@ gaps: []                             # 下游需注意的未覆盖点
 
 - `status` — agent 自报状态（它觉得自己做完了没）
 - `verdict` — **流程裁定**（pass=推进，fail/blocked=回退）。这是队长唯一读取的决策字段。
-- `artifacts` — 业务产物清单
+- `artifacts` — 业务产物清单（`.harness/` 下的路径）
 - `root_cause` — 失败根因，让下游不必猜测
 - `confidence` / `gaps` — 置信度与缺口
 
@@ -151,12 +175,12 @@ gaps: []                             # 下游需注意的未覆盖点
 |---|---|---|---|
 | parent issue metadata | 队长（唯一） | 全队 | 跨 stage 状态（current_stage / frozen / rollback 计数） |
 | child issue 评论 verdict block | 各 agent | 队长 + 下游 | 准出裁定 + 产物 + 根因 |
-| prd.md / design.md | 规划员 | 实现员、审查员 | 需求 + 验收标准 + 技术方案 |
-| business-test-cases.md | 规划员 | 人→实现员→审查员 | 需求侧测试用例（冻结后不改） |
-| tech-test-cases.md | 实现员 | 审查员 | 技术侧测试用例 |
-| review-verdict.yaml | 审查员 | 人 | 审查结论（`decision` 字段） |
-| task.json / gate-result.jsonl | 门禁脚本 | 门禁执行器、队长 | 任务内证据 + 熔断计数 |
-| baseline/ | 门禁执行器（脚本） | 门禁执行器、审查员 | unit/integration 快照+diff（before/after/diff.json）+ api 快照+diff（api-before/api-after/api-diff.json） |
+| .harness/specs/prd.md / design.md | 规划员 | 实现员、审查员 | 需求 + 验收标准 + 技术方案 |
+| .harness/specs/business-test-cases.md | 规划员 | 人→实现员→审查员 | 需求侧测试用例（冻结后不改） |
+| .harness/specs/tech-test-cases.md | 实现员 | 审查员 | 技术侧测试用例 |
+| .harness/review/review-verdict.yaml | 审查员 | 人 | 审查结论（`decision` 字段） |
+| .harness/evidence/task.json / gate-result.jsonl | 门禁脚本 | 门禁执行器、队长 | 任务内证据 + 熔断计数 |
+| .harness/evidence/baseline/ | 门禁执行器（脚本） | 门禁执行器、审查员 | unit/integration 快照+diff + api 快照+diff |
 
 ---
 
@@ -174,7 +198,7 @@ gaps: []                             # 下游需注意的未覆盖点
 
 ### 对抗性交付审查（Hybrid Gate）
 
-阶段 5 之后、阶段 6 之前，门禁执行器跑一次**新鲜上下文对抗性审查**（对标 SwarmAI Gate2）：不给 prd/design（消除 builder bias），只给 diff + test cases。产出 `adversarial-verdict.yaml`，不阻断，在人工验收时暴露。
+阶段 5 之后、阶段 6 之前，门禁执行器跑一次**新鲜上下文对抗性审查**（对标 SwarmAI Gate2）：不给 `.harness/specs/` 下的 prd/design（消除 builder bias），只给 diff + test cases。产出 `.harness/review/adversarial-verdict.yaml`，不阻断，在人工验收时暴露。
 
 ### 熔断
 
@@ -200,12 +224,12 @@ gaps: []                             # 下游需注意的未覆盖点
 | E2E 端到端 | 规划员（业务完整旅程） | 实现员（fixture） | 门禁执行器（能自动化的）+ **人类**（真账号/环境） | 门禁执行器 + 人类验收 |
 
 - **官方门禁执行全归门禁执行器**——`baseline.py` / `api_gate.py` 的 before/after/diff 一律由门禁执行器跑（否则等于自审）。实现员可在本地自验，但门禁以门禁执行器的快照为准。
-- **报告载体**：`gate-result.jsonl`（每门禁 append）+ `baseline/diff.json`（只 block 新增失败 B−A）+ verdict 评论。消费链：门禁执行器出 → 审查员读（语义判断）→ 人类验收。
+- **报告载体**：`.harness/evidence/gate-result.jsonl`（每门禁 append）+ `.harness/evidence/baseline/diff.json`（只 block 新增失败 B−A）+ verdict 评论。消费链：门禁执行器出 → 审查员读（语义判断）→ 人类验收。
 - **E2E 是例外**：能自动化的归门禁执行器，最终端到端验收归人类（Agent completed ≠ business completed）。
 
 ### 测试栈发现（项目相关，不下沉脚本默认）
 
-各项目测试命令不同（multica 是 `make test`+`pnpm test`，别的可能是 `pytest`/`go test`）。harness **不硬编码**——由项目 workdir 的 `test-plan.json` 声明各测试类型命令（`{unit:{cmd}, api:{cmd}, ...}`，`cmd:null` 表示该项目无此类测试→跳过不阻断）。阶段 4 的 `baseline.py` 用 `--exclude api` 只跑 unit/integration/lint/typecheck；阶段 5 的 `api_gate.py` 专门跑 `api` 键（B−A 语义），两门禁不重叠。`baseline.py` 优先读 test-plan，缺失则退回 pnpm 默认并警告。首次接入可扫 Makefile / AGENTS.md / package.json 生成草稿（`detect_tests.py`）。
+各项目测试命令不同（multica 是 `make test`+`pnpm test`，别的可能是 `pytest`/`go test`）。harness **不硬编码**——由项目 workdir 的 `.harness/test-plan.json` 声明各测试类型命令（`{unit:{cmd}, api:{cmd}, ...}`，`cmd:null` 表示该项目无此类测试→跳过不阻断）。阶段 4 的 `baseline.py` 用 `--exclude api` 只跑 unit/integration/lint/typecheck；阶段 5 的 `api_gate.py` 专门跑 `api` 键（B−A 语义），两门禁不重叠。`baseline.py` 优先读 test-plan，缺失则退回 pnpm 默认并警告。首次接入可扫 Makefile / AGENTS.md / package.json 生成草稿（`detect_tests.py`）。
 
 ---
 

@@ -55,7 +55,7 @@ python3 "$GATES_DIR/api_gate.py" diff --task .
 
 ## 硬门禁：事实 → 处置判断
 
-跑完 `baseline diff` / `api_gate diff` 后，从 `diff.json` 读 `new_failures` 清单（**客观事实，不可推翻**）。**逐条**做处置：
+跑完 `baseline diff` / `api_gate diff` 后，从 `.harness/evidence/baseline/diff.json` 读 `new_failures` 清单（**客观事实，不可推翻**）。**逐条**做处置：
 
 | 你的判定 | 信号 | 处置 |
 |---|---|---|
@@ -73,12 +73,12 @@ python3 "$GATES_DIR/api_gate.py" diff --task .
 这些门禁脚本只能"备料"，判定在你：
 
 - **PRD 质量评分**（阶段 2）：`plan_contract_check.py` 只给段落存在性（事实）；你评 5 维度——问题清晰度 / 成功标准可测性 / 验收完整 / 非目标明确 / 约束识别。明显低分 → warn 或建议队长打回上游。
-- **范围溢出**（阶段 6 前）：读 `git diff` + `design.md`，判 diff 是否超出 design 计划范围（防 AI 擅自改设计 / 解释性执行 / 加没要求的功能）。超范围项 → finding。
-- **对抗性交付审查**（阶段 5 后、6 前）：**新鲜上下文**——不给 prd/design（消除 builder bias），只看 diff + test cases，找隐藏 bug（边界 / 空值 / 注入 / 路径穿越 / 死代码 / 未接线）。产出 `adversarial-verdict.yaml`，不阻断，在人工验收暴露。
+- **范围溢出**（阶段 6 前）：读 `git diff` + `.harness/specs/design.md`，判 diff 是否超出 design 计划范围（防 AI 擅自改设计 / 解释性执行 / 加没要求的功能）。超范围项 → finding。
+- **对抗性交付审查**（阶段 5 后、6 前）：**新鲜上下文**——不给 `.harness/specs/` 下的 prd/design（消除 builder bias），只看 diff + test cases，找隐藏 bug（边界 / 空值 / 注入 / 路径穿越 / 死代码 / 未接线）。产出 `.harness/review/adversarial-verdict.yaml`，不阻断，在人工验收暴露。
 
 ## 证据必须落盘（每次都做）
 
-每跑完一个门禁，无论 pass/fail，追加一条到 workdir（append-only，永不覆盖）：
+每跑完一个门禁，无论 pass/fail，追加一条到 `.harness/evidence/gate-result.jsonl`（append-only，永不覆盖）：
 
 ```bash
 python3 "$GATES_DIR/gate_result.py" append \

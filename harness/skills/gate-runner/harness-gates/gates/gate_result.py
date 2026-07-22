@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Iterable
 
 import task_resolver
+from task_resolver import evidence_dir as _evidence_dir
 
 SCHEMA_VERSION = 1
 
@@ -130,7 +131,7 @@ def append_event(
     content. Returns the path written to.
     """
     task_dir.mkdir(parents=True, exist_ok=True)
-    target = task_dir / "gate-result.jsonl"
+    target = _evidence_dir(task_dir) / "gate-result.jsonl"
     line = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
     # Append mode: never truncate.
     with target.open("a", encoding="utf-8") as f:

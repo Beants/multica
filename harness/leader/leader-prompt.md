@@ -100,7 +100,7 @@ multica issue create --parent <p> --stage 2 --title "规划门禁" --assignee-id
    ```
    - `in_review` 在 issue 列表里清晰标记「等人审核」。
    - assignee 变成 member → `notifyParentOfChildDone` 跳过（不误唤醒），平台安静等人。
-3. 人评审 prd.md + business-test-cases.md：
+3. 人评审 `.harness/specs/` 下的 prd.md + business-test-cases.md：
    - 人要改 → 人评论写清修改点 + 把规划员 child 提回 todo（规划员 resume 后按自身 instructions 主动读 issue 评论）。
    - 人确认冻结 → 人设 `metadata set <parent> --key frozen_spec --value true --type bool` + `--key frozen_test_cases --value TC-001,TC-002`，再把 parent assignee 改回队长 agent。
 4. 队长被唤醒（assignee member→agent 触发 `RunSourceAssign`）→ `metadata set <parent> --key current_stage --value 3`，创建/推进阶段 3 child。

@@ -24,10 +24,13 @@ import sys
 from pathlib import Path
 
 import task_resolver
+from task_resolver import evidence_dir as _evidence_dir
 
 
 def _read_gates(task_dir: Path) -> list[dict]:
-    gr = task_dir / "gate-result.jsonl"
+    gr = _evidence_dir(task_dir) / "gate-result.jsonl"
+    if not gr.is_file():
+        gr = task_dir / "gate-result.jsonl"
     if not gr.is_file():
         return []
     events = []

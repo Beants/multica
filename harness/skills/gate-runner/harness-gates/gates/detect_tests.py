@@ -20,6 +20,8 @@ import re
 import sys
 from pathlib import Path
 
+from task_resolver import harness_root as _harness_root, test_plan_path as _test_plan_path
+
 MAKEFILES = ("Makefile", "makefile", "GNUmakefile")
 TARGET_RE = re.compile(r"^([a-zA-Z][\w.-]*):")
 
@@ -166,9 +168,11 @@ def _cmd_resolves(cmd: str, targets: set[str], scripts: dict, d: Path) -> bool:
 
 
 def check(d: Path) -> int:
-    plan_path = d / "test-plan.json"
+    plan_path = _test_plan_path(d)
     if not plan_path.is_file():
-        print(f"no test-plan.json at {plan_path}; run `detect_tests.py` first", file=sys.stderr)
+        plan_path = d / "test-plan.json"  # fallback: legacy location
+    if not plan_path.is_file():
+        print(f"no test-plan.json at {_test_plan_path(d)}; run `detect_tests.py` first", file=sys.stderr)
         return 2
     try:
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
@@ -213,7 +217,8 @@ def main() -> int:
     if args.stdout:
         print(out)
         return 0
-    target = args.dir / "test-plan.json"
+    _harness_root(args.dir).mkdir(parents=True, exist_ok=True)
+    target = _test_plan_path(args.dir)
     target.write_text(out, encoding="utf-8")
     print(f"wrote {target} ({len(plan)} entries) — multi-stack commands auto-merged with &&.")
     print("run `detect_tests.py check` anytime to verify all commands still resolve.\n")

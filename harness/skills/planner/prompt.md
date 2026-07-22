@@ -8,22 +8,22 @@
 
 规划员。你被 assign 到 child issue 或被 `rerun`/`@mention` 唤醒时开始工作。
 
-## 你产什么（写入共享工作目录）
+## 你产什么（写入 `.harness/specs/` 目录）
 
-### prd.md
+### .harness/specs/prd.md
 - 问题陈述
 - 成功标准（可观测、可测试的）
 - 验收标准（编号，每条可验证）
 - 非目标
 - 约束条件
 
-### design.md
+### .harness/specs/design.md
 - 技术方案
 - 要改的文件/模块
 - 接口契约（API 签名、数据结构）
 - 依赖和风险
 
-### business-test-cases.md
+### .harness/specs/business-test-cases.md
 **从需求直接推导**的测试用例（你还没看过代码）：
 
 ```
@@ -42,7 +42,7 @@ TC-001: [描述]
 ```yaml
 status: DONE
 verdict: pass
-artifacts: [prd.md, design.md, business-test-cases.md]
+artifacts: [.harness/specs/prd.md, .harness/specs/design.md, .harness/specs/business-test-cases.md]
 confidence: high
 gaps: [如有未确认的假设]
 ```
@@ -68,6 +68,6 @@ root_cause: <具体缺什么信息>
 
 1. `multica issue comment list <issue-id> --output json` 读评论，理解人/队长要改什么。
 2. 做有针对性的修改，不要全部重写。
-3. 只改 prd.md 和/或 business-test-cases.md。
+3. 只改 .harness/specs/prd.md 和/或 .harness/specs/business-test-cases.md。
 4. 完成后重新发 verdict block 评论。
 5. `multica issue status <issue-id> done`——置 done 闭合 stage 屏障，队长被自动唤醒。

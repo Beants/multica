@@ -16,12 +16,15 @@ import sys
 from pathlib import Path
 
 import task_resolver
+from task_resolver import specs_dir as _specs_dir, evidence_dir as _evidence_dir, baseline_dir as _baseline_dir
 
 TASK_JSON = "task.json"
 
 
 def _read_task_json(task_dir: Path) -> dict:
-    p = task_dir / TASK_JSON
+    p = _evidence_dir(task_dir) / TASK_JSON
+    if not p.is_file():
+        p = task_dir / TASK_JSON  # fallback: legacy location
     if not p.is_file():
         return {}
     return json.loads(p.read_text(encoding="utf-8"))
@@ -76,13 +79,14 @@ def _command_contract(snapshot: dict) -> dict[str, object] | None:
 def check_task(task_dir: Path) -> dict:
     """Return {"passed": [...], "missing": [...], "warnings": [...]}."""
     data = _read_task_json(task_dir)
-    is_complex = (task_dir / "design.md").is_file()
+    sdir = _specs_dir(task_dir)
+    is_complex = (sdir / "design.md").is_file() or (task_dir / "design.md").is_file()
     passed: list[str] = []
     missing: list[str] = []
     warnings: list[str] = []
 
     # Required for all tasks
-    if (task_dir / "prd.md").is_file():
+    if (sdir / "prd.md").is_file() or (task_dir / "prd.md").is_file():
         passed.append("prd.md exists")
     else:
         missing.append("prd.md missing")
@@ -90,14 +94,16 @@ def check_task(task_dir: Path) -> dict:
     # Required for complex tasks
     if is_complex:
         for f in ("design.md", "implement.md"):
-            if (task_dir / f).is_file():
+            if (sdir / f).is_file() or (task_dir / f).is_file():
                 passed.append(f"{f} exists")
             else:
                 missing.append(f"{f} missing (complex task)")
 
     # implement.jsonl / check.jsonl should have real entries
     for jf in ("implement.jsonl", "check.jsonl"):
-        path = task_dir / jf
+        path = _evidence_dir(task_dir) / jf
+        if not path.is_file():
+            path = task_dir / jf  # fallback
         if path.is_file():
             lines = [
                 line
@@ -112,7 +118,9 @@ def check_task(task_dir: Path) -> dict:
             warnings.append(f"{jf} not found")
 
     # Evidence runtime
-    gr = task_dir / "gate-result.jsonl"
+    gr = _evidence_dir(task_dir) / "gate-result.jsonl"
+    if not gr.is_file():
+        gr = task_dir / "gate-result.jsonl"  # fallback
     events = _read_gate_events(gr, warnings)
     if gr.is_file():
         count = len(events)
@@ -133,7 +141,9 @@ def check_task(task_dir: Path) -> dict:
         warnings.append("gate-result.jsonl not found (no evidence trail)")
 
     # Baseline
-    baseline_diff = task_dir / "baseline" / "diff.json"
+    baseline_diff = _baseline_dir(task_dir) / "diff.json"
+    if not baseline_diff.is_file():
+        baseline_diff = task_dir / "baseline" / "diff.json"  # fallback
     if baseline_diff.is_file():
         try:
             diff = json.loads(baseline_diff.read_text(encoding="utf-8"))
@@ -148,7 +158,9 @@ def check_task(task_dir: Path) -> dict:
         warnings.append("baseline/diff.json not found")
 
     # Optional traceability becomes a hard delivery contract when selected.
-    verification_path = task_dir / "verification-contract.json"
+    verification_path = _specs_dir(task_dir) / "verification-contract.json"
+    if not verification_path.is_file():
+        verification_path = task_dir / "verification-contract.json"  # fallback
     if verification_path.is_file():
         try:
             import verification_contract_check
@@ -157,7 +169,9 @@ def check_task(task_dir: Path) -> dict:
                 "verification contract selected but verification_contract_check.py is unavailable"
             )
         else:
-            results_path = task_dir / "case-results.jsonl"
+            results_path = _evidence_dir(task_dir) / "case-results.jsonl"
+            if not results_path.is_file():
+                results_path = task_dir / "case-results.jsonl"  # fallback
             try:
                 contract = json.loads(verification_path.read_text(encoding="utf-8"))
                 if not isinstance(contract, dict):
@@ -207,7 +221,9 @@ def check_task(task_dir: Path) -> dict:
         warnings.append("no git branch recorded in task.json")
 
     # Research artifacts (recommended for complex)
-    research_dir = task_dir / "research"
+    research_dir = _specs_dir(task_dir) / "research"
+    if not research_dir.is_dir():
+        research_dir = task_dir / "research"  # fallback
     if research_dir.is_dir():
         files = list(research_dir.glob("*.md"))
         if files:
