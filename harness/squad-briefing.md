@@ -44,13 +44,13 @@
 | 阶段 | assignee | 门禁 | 产出物 |
 |---|---|---|---|
 | 1 规划 | 规划员 | — | .harness/specs/prd.md, .harness/specs/design.md, .harness/specs/business-test-cases.md |
-| 2 规划门禁 | 门禁执行器 | plan_contract_check.py（硬）+ `baseline.py snapshot --phase before --exclude api`（冻结已知失败基线） | verdict, .harness/evidence/baseline/before.json |
+| 2 确定门禁基线 | 门禁执行器 | plan_contract_check.py（硬）+ `baseline.py snapshot --phase before --exclude api`（冻结已知失败基线） | verdict, .harness/evidence/baseline/before.json |
 | ★ Spec Freeze | 人类（暂停，非编号 stage） | 评审 .harness/specs/ 下的 prd + business-test-cases | `frozen_spec=true` |
 | 3 实现 | 实现员 | — | 代码, .harness/specs/tech-test-cases.md（**不碰 baseline 脚本**） |
-| 4 基线门禁 | 门禁执行器 | `baseline.py snapshot --phase after --exclude api` + `diff`（硬）—只跑 unit/integration/lint/typecheck | .harness/evidence/baseline/{after,diff}.json |
-| 5 API/接口门禁 | 门禁执行器 | `api_gate.py snapshot --phase after` + `diff`（硬）—只跑 test-plan 的 `api` 键；无 api 键则 SKIP | .harness/evidence/baseline/api-{after,diff}.json |
-| 6 代码审查 | 代码审查员 | soft gate（不阻断） | .harness/review/review-verdict.yaml |
-| 7 验收 | 人类 | 验收 | done / 驳回 |
+| 4 基础测试门禁 | 门禁执行器 | `baseline.py snapshot --phase after --exclude api` + `diff`（硬）—只跑 unit/integration/lint/typecheck | .harness/evidence/baseline/{after,diff}.json |
+| 5 接口测试门禁 | 门禁执行器 | `api_gate.py snapshot --phase after` + `diff`（硬）—只跑 test-plan 的 `api` 键；无 api 键则 SKIP | .harness/evidence/baseline/api-{after,diff}.json |
+| 6 代码审查门禁 | 代码审查员 | soft gate（不阻断） | .harness/review/review-verdict.yaml |
+| 7 人工验收 | 人类 | 验收 | done / 驳回 |
 
 > **★ Spec Freeze 不是 `--stage`。** Multica 的 `--stage` 是整数（`issue.stage` Int32），没有 2.5。Spec Freeze 的平台原生落法：阶段 2 闭合后，队长把 **parent 状态改为 `in_review` + assignee 改给人类 member** → 平台停止自动唤醒（member assignee 不触发 child-done 唤醒）+ issue 列表显示「等人审核」→ 人评审 prd/business-test-cases → 设 `frozen_spec`(--type bool)+`frozen_test_cases` → 把 assignee 改回队长 agent → assignee 变化触发 `RunSourceAssign` 唤醒队长推进阶段 3。不建 child issue、不占 stage 编号。
 >
@@ -58,14 +58,14 @@
 >
 > **API 测试前置**（阶段 5，在代码审查之前）：单元测试过 ≠ 接口对得上。接口对不上是几秒能验证的事，不能躺到最贵的代码审查才暴露——应用宝此招把审查平均打回从 1.8 次降到 0.4 次。
 
-### Bugfix 流水线（4 阶段，无 Spec Freeze、无独立 API 门禁）
+### Bugfix 流水线（4 阶段，无 Spec Freeze、无独立接口测试门禁）
 
 | 阶段 | assignee | 门禁 |
 |---|---|---|
 | 1 规划（精简） | 规划员 | — |
 | 2 实现 | 实现员 | — |
-| 3 基线门禁 | 门禁执行器 | baseline.py snapshot --phase after + diff（硬，跑全部 test-plan 命令） |
-| 4 代码审查 | 代码审查员 | soft gate |
+| 3 基础测试门禁 | 门禁执行器 | baseline.py snapshot --phase after + diff（硬，跑全部 test-plan 命令） |
+| 4 代码审查门禁 | 代码审查员 | soft gate |
 
 > bugfix 的验收：阶段 4 审查 pass 后，把 parent 挪到 `in_review` 并改给人类 member（同 Spec Freeze 的 `in_review` + member-暂停机制），不占额外 stage。
 

@@ -1,21 +1,21 @@
-# Standard Pipeline — 6 stages, 2 human gates
+# Standard Pipeline — 7 stages, 2 human gates
 #
 # Usage: Leader reads this to know which stages to create and in what order.
 # Each stage has one role slot. The gate-runner stages run scripts.
 
 pipeline:
   name: standard
-  description: "Full pipeline: plan → gate → implement → gate → review → accept"
+  description: "Full pipeline: plan → establish baseline → implement → basic tests → interface tests → code review → human acceptance"
 
   stages:
     - id: 1
       name: Plan
       role: planner
       initial_status: todo
-      produces: [prd.md, design.md, business-test-cases.md]
+      produces: [.harness/specs/prd.md, .harness/specs/design.md, .harness/specs/business-test-cases.md]
 
     - id: 2
-      name: Plan Gate
+      name: Establish Gate Baseline
       role: gate-runner
       initial_status: backlog
       gate:
@@ -28,10 +28,10 @@ pipeline:
       name: Implement
       role: implementer
       initial_status: backlog
-      produces: [code, tech-test-cases.md, baseline/after.json]
+      produces: [code, .harness/specs/tech-test-cases.md]
 
     - id: 4
-      name: Baseline Gate
+      name: Run Basic Test Gate
       role: gate-runner
       initial_status: backlog
       gate:
@@ -41,25 +41,35 @@ pipeline:
         on_fail: rework stage 3
 
     - id: 5
-      name: Review
+      name: Interface Test Gate
+      role: gate-runner
+      initial_status: backlog
+      gate:
+        type: script
+        script: api_gate.py diff
+        hard: true
+        on_fail: rework stage 3
+
+    - id: 6
+      name: Code Review Gate
       role: reviewer
       initial_status: backlog
-      produces: [review-verdict.yaml]
+      produces: [.harness/review/review-verdict.yaml]
       gate:
         type: soft
         hard: false
         on_fail: record findings, continue
 
-    - id: 6
-      name: Acceptance
+    - id: 7
+      name: Human Acceptance
       role: human
       initial_status: backlog
 
   human_gates:
-    - after_stage: 1
+    - after_stage: 2
       name: Spec Freeze
       description: "Human reviews prd.md + business-test-cases.md"
-    - at_stage: 6
+    - at_stage: 7
       name: Final Acceptance
       description: "Human verifies all test cases pass"
 

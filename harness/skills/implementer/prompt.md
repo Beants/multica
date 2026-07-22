@@ -69,7 +69,7 @@ tried: [已尝试的方案]
 你被唤醒的触发源是 `rerun` 或评论里的 `@mention`——平台不会把评论自动注入你的上下文，你必须自己读。
 
 1. `multica issue comment list <issue-id> --output json` 读评论，看失败详情 + `root_cause`。
-2. 读 `.harness/evidence/baseline/diff.json`（如果是基线门禁失败）。
+2. 读 `.harness/evidence/baseline/diff.json`（如果是基础测试门禁失败）。
 3. **只修**被报告的问题，不重构无关代码。
 4. 重跑失败的测试。
 5. 完成后重新发 verdict block 评论。

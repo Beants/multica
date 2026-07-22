@@ -32,7 +32,7 @@ fi
 | 脚本 | 用途 | 什么时候跑 |
 |---|---|---|
 | `plan_contract_check.py` | 检查 prd/design 存在 + 有必要段落（**事实备料**，质量由你评，见半硬门禁） | 阶段 2 |
-| `baseline.py snapshot --phase before --exclude api` | 冻结 unit/integration 已知失败基线 | 阶段 2（规划门禁内） |
+| `baseline.py snapshot --phase before --exclude api` | 冻结 unit/integration 已知失败基线 | 阶段 2（确定门禁基线） |
 | `baseline.py snapshot --phase after --exclude api` + `diff` | 前后 diff，产出 `new_failures`（**事实**）；`--exclude api` 把 api 留给阶段 5 | 阶段 4 |
 | `api_gate.py snapshot --phase after` + `diff` | 只跑 test-plan 的 `api` 键，产出 api 的 `new_failures`（**事实**）；无 api 键 → SKIP | 阶段 5 |
 | `delivery_checklist.py` | 检查所有产出物齐全 | 交付前 |
@@ -42,13 +42,13 @@ fi
 > `--task` 用 `.` 或 workdir 绝对路径。`--exclude api` 关键：不让阶段 4 和阶段 5 重复跑 api。`test-plan.json` 由 `detect_tests.py` 生成草稿。脚本是 harness 预置工程资产，你**只跑不改**。
 
 ```bash
-# 阶段 2 规划门禁
+# 阶段 2 确定门禁基线
 python3 "$GATES_DIR/plan_contract_check.py" --task .
 python3 "$GATES_DIR/baseline.py" snapshot --task . --phase before --exclude api
-# 阶段 4 基线门禁（after + diff）
+# 阶段 4 基础测试门禁（after + diff）
 python3 "$GATES_DIR/baseline.py" snapshot --task . --phase after --exclude api
 python3 "$GATES_DIR/baseline.py" diff --task .
-# 阶段 5 API 门禁（无 api 键 → exit 0 SKIP）
+# 阶段 5 接口测试门禁（无 api 键 → exit 0 SKIP）
 python3 "$GATES_DIR/api_gate.py" snapshot --task . --phase after
 python3 "$GATES_DIR/api_gate.py" diff --task .
 ```
