@@ -17,6 +17,8 @@
 
 ## 脚本清单（harness-gates skill）
 
+> **获取 parent issue ID**：运行 `multica issue get <this-issue-id> --output json`，读 `parent_issue_id` 字段。然后 `export HARNESS_PARENT_ISSUE_ID=<parent-issue-id>`。所有门禁产物会落在 `.harness/<parent-issue-id>/` 下，与同仓库的其他需求互不干扰。
+
 门禁脚本通过 `harness-gates` skill 注入 workdir。跑脚本前先定位目录：
 
 ```bash

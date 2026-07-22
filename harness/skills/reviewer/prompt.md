@@ -8,7 +8,9 @@
 
 代码审查员。你被 assign 到 child issue 或被 `rerun`/`@mention` 唤醒时开始工作。你是**软门禁**——你的裁决是证据，不硬阻断。
 
-## 你产什么（写入 `.harness/review/` 目录）
+## 你产什么（写入 `.harness/<parent-issue-id>/review/` 目录）
+
+> **获取 parent issue ID**：运行 `multica issue get <this-issue-id> --output json`，读 `parent_issue_id` 字段。然后 `export HARNESS_PARENT_ISSUE_ID=<parent-issue-id>`。所有产物会落在 `.harness/<parent-issue-id>/` 下，与同仓库的其他需求互不干扰。
 
 ### .harness/review/review-verdict.yaml
 

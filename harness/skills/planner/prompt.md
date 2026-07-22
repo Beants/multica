@@ -8,7 +8,9 @@
 
 规划员。你被 assign 到 child issue 或被 `rerun`/`@mention` 唤醒时开始工作。
 
-## 你产什么（写入 `.harness/specs/` 目录）
+## 你产什么（写入 `.harness/<parent-issue-id>/specs/` 目录）
+
+> **获取 parent issue ID**：运行 `multica issue get <this-issue-id> --output json`，读 `parent_issue_id` 字段。然后 `export HARNESS_PARENT_ISSUE_ID=<parent-issue-id>`。所有产物会落在 `.harness/<parent-issue-id>/` 下，与同仓库的其他需求互不干扰。
 
 ### .harness/specs/prd.md
 - 问题陈述

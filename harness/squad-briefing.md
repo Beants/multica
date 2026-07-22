@@ -90,39 +90,45 @@
 
 > 为什么不用 `pipeline-state.yaml`？它会被 GC 清理（done issue 的 workdir 24h 删除）、无并发保护、且没有脚本读取。issue metadata 是 Multica 专门为 pipeline 状态设计的原子 KV。
 
-### 层 2：任务级证据（单 workdir 内）—— 走 `.harness/` 目录
+### 层 2：任务级证据（单 workdir 内）—— 走 `.harness/<parent-issue-id>/` 目录
 
-每个 child issue 对应一次 task 执行，有一个独立 workdir。任务内的证据由脚本管理，统一放在 workdir 的 `.harness/` 目录下：
+每个 child issue 对应一次 task 执行，有独立 workdir。任务内的证据由脚本管理，统一放在 workdir 的 `.harness/<parent-issue-id>/` 目录下——按需求隔离，不同需求的产物互不干扰：
 
 ```
 <workdir>/.harness/
-├── specs/                       ← AI 规划产物（规划员写）
-│   ├── prd.md
-│   ├── design.md
-│   ├── business-test-cases.md
-│   └── tech-test-cases.md       ← 实现员写
-├── review/                      ← 审查产物（审查员写）
-│   ├── review-verdict.yaml
-│   └── adversarial-verdict.yaml ← 门禁执行器写
-├── evidence/                    ← 脚本证据（门禁脚本写）
-│   ├── task.json                ← 单任务状态（含 meta.rollbacks，熔断计数源）
-│   ├── gate-result.jsonl        ← 门禁事件流（append-only）
-│   └── baseline/                ← 测试快照 + diff
-│       ├── before.json
-│       ├── after.json
-│       ├── diff.json
-│       ├── api-before.json
-│       ├── api-after.json
-│       └── api-diff.json
-└── test-plan.json               ← 测试配置（detect_tests.py 生成）
+├── <parent-issue-id>/            ← 按需求隔离（agent 从 issue get 读 parent_issue_id）
+│   ├── specs/                    ← AI 规划产物（规划员写）
+│   │   ├── prd.md
+│   │   ├── design.md
+│   │   ├── business-test-cases.md
+│   │   └── tech-test-cases.md    ← 实现员写
+│   ├── review/                   ← 审查产物（审查员写）
+│   │   ├── review-verdict.yaml
+│   │   └── adversarial-verdict.yaml ← 门禁执行器写
+│   ├── evidence/                 ← 脚本证据（门禁脚本写）
+│   │   ├── task.json             ← 单任务状态（含 meta.rollbacks，熔断计数源）
+│   │   ├── gate-result.jsonl     ← 门禁事件流（append-only）
+│   │   └── baseline/             ← 测试快照 + diff
+│   │       ├── before.json
+│   │       ├── after.json
+│   │       ├── diff.json
+│   │       ├── api-before.json
+│   │       ├── api-after.json
+│   │       └── api-diff.json
+│   └── test-plan.json            ← 测试配置（detect_tests.py 生成）
+└── <另一个-parent-issue-id>/     ← 其他需求互不干扰
 ```
 
-- `.harness/specs/` — AI 制品，由规划员/实现员写入，下游只读
-- `.harness/review/` — 审查产物，由审查员/门禁执行器写入
-- `.harness/evidence/` — 脚本证据，由门禁脚本维护，AI 不手写
-- `.harness/test-plan.json` — 项目测试配置，由 `detect_tests.py` 生成
+- `.harness/<pid>/specs/` — AI 制品，由规划员/实现员写入，下游只读
+- `.harness/<pid>/review/` — 审查产物，由审查员/门禁执行器写入
+- `.harness/<pid>/evidence/` — 脚本证据，由门禁脚本维护，AI 不手写
+- `.harness/<pid>/test-plan.json` — 项目测试配置，由 `detect_tests.py` 生成
 
-> 脚本有 fallback 逻辑：如果 `.harness/` 下找不到文件，会回退到 workdir 根目录（向后兼容旧项目）。新项目一律用 `.harness/`。
+> **agent 获取 parent issue ID**：`multica issue get <this-issue-id> --output json` → `parent_issue_id` 字段，然后 `export HARNESS_PARENT_ISSUE_ID=<id>`。脚本自动读该环境变量定位目录。
+>
+> **全部进 git**：`.harness/` 下的所有文件（含 evidence）都进 git，每个需求一个完整的审计档案。按 parent-issue-id 隔离后互不干扰。
+>
+> 脚本有 fallback 逻辑：如果 `HARNESS_PARENT_ISSUE_ID` 未设且 `.harness/.parent` marker 文件不存在，回退到 `.harness/_default/`（向后兼容）。
 
 ---
 

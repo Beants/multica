@@ -23,49 +23,83 @@ from __future__ import annotations
 from pathlib import Path
 
 # ── Harness artifact directory layout ──────────────────────────────
-# All harness artifacts live under <workdir>/.harness/ to keep them
-# separate from the project's own source tree.
+# All harness artifacts live under <workdir>/.harness/<parent-issue-id>/
+# to keep them separate from the project's own source tree AND isolated
+# per requirement (parent issue). Agent obtains the parent issue id from
+# `multica issue get <this-issue-id>` → parent_issue_id.
 HARNESS_DIRNAME = ".harness"
 SPECS_DIRNAME = "specs"
 REVIEW_DIRNAME = "review"
 EVIDENCE_DIRNAME = "evidence"
 BASELINE_DIRNAME = "baseline"
 
-
-def harness_root(task_dir: Path) -> Path:
-    """Return <task_dir>/.harness (does not create it)."""
-    return task_dir / HARNESS_DIRNAME
+# Fallback when parent-issue-id is unknown (legacy compat / standalone run).
+_DEFAULT_PARENT_KEY = "_default"
 
 
-def specs_dir(task_dir: Path) -> Path:
-    """Return <task_dir>/.harness/specs (AI planning artifacts)."""
-    return harness_root(task_dir) / SPECS_DIRNAME
+def _read_parent_issue_id(task_dir: Path) -> str | None:
+    """Try to read the parent issue id from env or a marker file.
+
+    Multica runtime sets MULTICA_ISSUE_ID for the current task. The agent
+    can also pass --parent-issue on the CLI. As a last resort, check for
+    a .harness/.parent marker file written by a prior run.
+    """
+    import os
+    # 1. Explicit env var (agent sets it after reading issue get)
+    val = os.environ.get("HARNESS_PARENT_ISSUE_ID", "")
+    if val:
+        return val
+    # 2. Marker file
+    marker = task_dir / HARNESS_DIRNAME / ".parent"
+    if marker.is_file():
+        return marker.read_text(encoding="utf-8").strip() or None
+    return None
 
 
-def review_dir(task_dir: Path) -> Path:
-    """Return <task_dir>/.harness/review (review artifacts)."""
-    return harness_root(task_dir) / REVIEW_DIRNAME
+def harness_root(task_dir: Path, parent_issue_id: str | None = None) -> Path:
+    """Return <task_dir>/.harness[/<parent-issue-id>] (does not create it).
+
+    If parent_issue_id is given (or discoverable via env/marker), returns
+    the per-requirement subdirectory. Otherwise returns the bare .harness/
+    root for backward compat.
+    """
+    root = task_dir / HARNESS_DIRNAME
+    pid = parent_issue_id or _read_parent_issue_id(task_dir)
+    if pid:
+        return root / pid
+    return root / _DEFAULT_PARENT_KEY
 
 
-def evidence_dir(task_dir: Path) -> Path:
-    """Return <task_dir>/.harness/evidence (script-managed evidence)."""
-    return harness_root(task_dir) / EVIDENCE_DIRNAME
+def specs_dir(task_dir: Path, parent_issue_id: str | None = None) -> Path:
+    """Return <task_dir>/.harness/<pid>/specs (AI planning artifacts)."""
+    return harness_root(task_dir, parent_issue_id) / SPECS_DIRNAME
 
 
-def baseline_dir(task_dir: Path) -> Path:
-    """Return <task_dir>/.harness/evidence/baseline (test snapshots)."""
-    return evidence_dir(task_dir) / BASELINE_DIRNAME
+def review_dir(task_dir: Path, parent_issue_id: str | None = None) -> Path:
+    """Return <task_dir>/.harness/<pid>/review (review artifacts)."""
+    return harness_root(task_dir, parent_issue_id) / REVIEW_DIRNAME
 
 
-def test_plan_path(task_dir: Path) -> Path:
-    """Return <task_dir>/.harness/test-plan.json."""
-    return harness_root(task_dir) / "test-plan.json"
+def evidence_dir(task_dir: Path, parent_issue_id: str | None = None) -> Path:
+    """Return <task_dir>/.harness/<pid>/evidence (script-managed evidence)."""
+    return harness_root(task_dir, parent_issue_id) / EVIDENCE_DIRNAME
 
 
-def ensure_harness_dirs(task_dir: Path) -> None:
-    """Create .harness/{specs,review,evidence/baseline} if missing."""
-    for d in (specs_dir(task_dir), review_dir(task_dir),
-              baseline_dir(task_dir)):
+def baseline_dir(task_dir: Path, parent_issue_id: str | None = None) -> Path:
+    """Return <task_dir>/.harness/<pid>/evidence/baseline (test snapshots)."""
+    return evidence_dir(task_dir, parent_issue_id) / BASELINE_DIRNAME
+
+
+def test_plan_path(task_dir: Path, parent_issue_id: str | None = None) -> Path:
+    """Return <task_dir>/.harness/<pid>/test-plan.json."""
+    return harness_root(task_dir, parent_issue_id) / "test-plan.json"
+
+
+def ensure_harness_dirs(task_dir: Path, parent_issue_id: str | None = None) -> None:
+    """Create .harness/<pid>/{specs,review,evidence/baseline} if missing."""
+    for d in (specs_dir(task_dir, parent_issue_id),
+              review_dir(task_dir, parent_issue_id),
+              baseline_dir(task_dir, parent_issue_id)):
         d.mkdir(parents=True, exist_ok=True)
 
 
