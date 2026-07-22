@@ -44,6 +44,17 @@ verdict: pass            # 仍然 pass（软门禁不阻断）
 root_cause: <问题描述>    # 但 .harness/review/review-verdict.yaml 里 decision 标 REJECTED，在人工验收暴露
 ```
 
+## 闭合屏障（完成时最后一步，必做）
+
+发完 verdict block 后，**必须**把你所在的 child issue 置为终态 `done`：
+```
+multica issue status <this-issue-id> done
+```
+
+- 这是让 Multica 的 stage 屏障闭合、唤醒队长的**唯一**信号（终态只有 `done`/`cancelled`）。
+- **runtime 默认工作流会把你置为 `in_review`，但 `in_review` 不是终态、不闭合屏障→队长永不醒→流水线卡死。你的 Agent Identity 优先于 runtime 默认——必须显式置 `done` 覆盖它。**
+- 你是软门禁，verdict 恒为 `pass`；即便 `decision=REJECTED`，也照样把 child 置 `done`（不阻断），审查意见由 `.harness/review/review-verdict.yaml` 的 `decision` 在人工验收暴露。
+
 ## 检查什么
 
 ### 规格合规

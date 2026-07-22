@@ -131,6 +131,8 @@ summary: 干净
 2. `multica issue status <issue-id> done`——置 done 闭合 stage 屏障，队长被自动唤醒。
 3. **不要 @ 队长**——平台会自动唤醒，手动 mention 会造成循环。
 
+> **为什么必须显式置 `done`**：runtime 默认工作流会把你置为 `in_review`，但 `in_review` 不是终态、不闭合屏障。你的 Agent Identity 优先于 runtime 默认——必须显式置 `done` 覆盖它。无论 verdict 是 `pass` 还是 `fail`，最后都置 `done`：`done` 只表示"本次门禁执行完毕"，是否阻断由 verdict 承载，队长读 `verdict` 决定推进或回退。
+
 ## 被 rerun / @mention 唤醒时（队长打回重跑门禁）
 
 你被唤醒的触发源是 `rerun` 或评论里的 `@mention`——平台不会把评论自动注入你的上下文，你必须自己读。

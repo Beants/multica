@@ -31,7 +31,7 @@
 
 **关键规则**：
 
-1. 完成工作后，把 child issue 置为 `done`——平台会自动唤醒队长。**不要 @ 队长**，会造成 mention 循环。
+1. 完成工作后，把 child issue 置为 `done`——平台会自动唤醒队长。**不要 @ 队长**，会造成 mention 循环。**注意：runtime 默认会把你的 issue 置为 `in_review`，但 `in_review` 不是终态、不闭合屏障。你的 Agent Identity（本文件 + 角色 prompt）优先于 runtime 默认工作流——必须显式置 `done` 覆盖它。**
 2. `done → todo` 的回退转移**不会**唤醒 agent。队长回退时会用 `rerun` 或 `@mention` 显式触发你。
 3. 阻塞时也置 `done`，在 verdict block 里写 `verdict: blocked`。不要把 issue 置为 `blocked` 状态——`blocked` 不是终态，不会闭合 stage 屏障。
 
@@ -141,6 +141,8 @@
 
 **铁律：下游不可修改上游产物。** 要改就在 issue 评论里提，由队长打回上游重做。
 
+> 注：上表「不碰/碰 issue 状态」有**唯一例外**——每个专家完成时必须把**自己所在的 child** 置为 `done`（闭合屏障，见准出协议「闭合屏障」）。除此之外，不碰任何其他 issue 状态、不碰 parent metadata。
+
 ---
 
 ## 准出协议（Submission Verdict）
@@ -164,6 +166,8 @@ gaps: []                             # 下游需注意的未覆盖点
 - `artifacts` — 业务产物清单（`.harness/` 下的路径）
 - `root_cause` — 失败根因，让下游不必猜测
 - `confidence` / `gaps` — 置信度与缺口
+
+> **gap 的权威落点是 prd/design 正文**（design 的「依赖与风险」、prd 的「非目标」+ AC），不是 `gate-result.jsonl`（那只是门禁证据日志）。child 评论的 `gaps:` 字段只是摘要/入口，真正要跟踪的 gap 写进制品正文。
 
 **命名铁律：`verdict` 这个词全队只表示流程裁定（pass/fail/blocked）。** 代码审查的业务意见用 `decision`（APPROVED/CONDITIONAL/REJECTED），不得占用 `verdict`，避免队长误读。
 

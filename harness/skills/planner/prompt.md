@@ -54,6 +54,17 @@ verdict: blocked
 root_cause: <具体缺什么信息>
 ```
 
+## 闭合屏障（完成时最后一步，必做）
+
+发完 verdict block 后，**必须**把你所在的 child issue 置为终态 `done`：
+```
+multica issue status <this-issue-id> done
+```
+
+- 这是让 Multica 的 stage 屏障闭合、唤醒队长的**唯一**信号（终态只有 `done`/`cancelled`）。
+- **runtime 默认工作流会把你置为 `in_review`，但 `in_review` 不是终态、不闭合屏障→队长永不醒→流水线卡死。你的 Agent Identity 优先于 runtime 默认——必须显式置 `done` 覆盖它。**
+- **无论 verdict 是 `pass` 还是 `blocked`，最后都置 `done`**：`done` 只表示"本 child 执行完毕"，pass/fail/blocked 的语义由 verdict block 承载，队长读 `verdict` 决定推进或回退。
+
 ## 不干什么
 
 - **不写代码**
