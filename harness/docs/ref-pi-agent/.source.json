@@ -1,7 +1,0 @@
-{
-  "repo": "@earendil-works/pi-coding-agent",
-  "version": "0.81.1",
-  "source": "npm global install (/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/)",
-  "fetched_at": "2026-07-22",
-  "_doc": "Pi coding agent 的文档+示例代码快照，作为 harness 设计参考（agent CLI 的 skill 机制、prompt 模板、session 管理等）。images/ 已排除。"
-}
