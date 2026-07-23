@@ -104,6 +104,21 @@ type Task struct {
 	QuickCreateDueDate       string                 `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
 	QuickCreateAttachmentIDs []string               `json:"quick_create_attachment_ids,omitempty"` // attachments uploaded in the quick-create prompt and bound by issue create
 	HandoffNote              string                 `json:"handoff_note,omitempty"`                // assignment handoff instruction; rendered into the opening prompt + issue_context.md
+	// WorkflowStepNodeKey is non-empty when this task was spawned by a
+	// workflow_run activating an agent node (see workflow/activate.go).
+	// It carries the node_key (e.g. "plan", "implement", "review") so the
+	// daemon can route BuildPrompt to the workflow-specific prompt that
+	// teaches the submission protocol. Empty for every non-workflow task
+	// kind (chat / comment / autopilot / quick-create / plain assignment).
+	// The server fills it by looking up step_instance.agent_task_id at
+	// claim time (handler/daemon.go buildClaimedTaskResponse).
+	WorkflowStepNodeKey string `json:"workflow_step_node_key,omitempty"`
+	// WorkflowStepRole is non-empty when this task was spawned by a
+	// workflow_run activating an agent node. It carries the node's role
+	// (e.g. "executor", "evaluator") so the daemon can teach evaluator
+	// nodes to submit verdicts. Empty for every non-workflow task kind.
+	// The server fills it from workflow_node.config.role at claim time.
+	WorkflowStepRole string `json:"workflow_step_role,omitempty"`
 
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text

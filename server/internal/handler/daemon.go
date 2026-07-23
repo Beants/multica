@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
@@ -2405,6 +2406,36 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		)
 	}
 
+	// Workflow agent-node dispatch marker (P3-3 KI-5): when this task was
+	// activated by a workflow_run, step_instance.agent_task_id points back
+	// here and the row carries the node_key (plan/implement/review/...).
+	// Surfacing it tells the daemon's BuildPrompt to route to the workflow
+	// prompt that teaches the submission protocol, so every workflow agent
+	// is automatically submission-aware without per-agent instruction
+	// rewrites. Empty for every non-workflow task kind — GetStepInstanceByTask
+	// returns ErrNoRows and we skip silently. Best-effort: any DB error
+	// (including a transient one) leaves the marker empty, which only
+	// degrades to the existing assignment prompt — it never blocks claim.
+	if step, err := h.Queries.GetStepInstanceByTask(r.Context(), task.ID); err == nil {
+		resp.WorkflowStepNodeKey = step.NodeKey
+		// Fetch the node's role from workflow_node.config.role so the daemon
+		// can teach evaluator nodes to submit verdicts.
+		// Get run to find template_id, then get node by template_id + node_key
+		if run, rerr := h.Queries.GetWorkflowRun(r.Context(), step.RunID); rerr == nil {
+			if node, nerr := h.Queries.GetWorkflowNodeByKey(r.Context(), db.GetWorkflowNodeByKeyParams{
+				TemplateID: run.TemplateID,
+				NodeKey:    step.NodeKey,
+			}); nerr == nil {
+				var cfg struct {
+					Role string `json:"role"`
+				}
+				if json.Unmarshal(node.Config, &cfg) == nil && cfg.Role != "" {
+					resp.WorkflowStepRole = cfg.Role
+				}
+			}
+		}
+	}
+
 	return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil
 }
 
@@ -2868,6 +2899,33 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task completed", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
+
+	// Harness enforcement: if this task is bound to a workflow step and has no
+	// submission yet, auto-create a minimal submission so the workflow can
+	// proceed. This closes the gap where agents complete work but forget to
+	// call `multica submission create`, leaving the workflow stuck.
+	if step, err := h.Queries.GetStepInstanceByTask(r.Context(), task.ID); err == nil {
+		if _, subErr := h.Queries.GetSubmissionByStepInstance(r.Context(), step.ID); errors.Is(subErr, pgx.ErrNoRows) {
+			// Auto-create submission. NOTE: this bypasses the engine's executor
+			// verdict logic (engine.go:955-967). For now this is acceptable
+			// because all current workflow agent nodes are evaluators that
+			// need an explicit verdict; the engine's auto-verdict path is
+			// exercised by the agent's own multica submission create call.
+			// TODO(P3-3): plumb WorkflowEngine through Handler and call
+			// Engine.CreateSubmission so executor nodes get system verdicts.
+			if _, createErr := h.Queries.CreateSubmission(r.Context(), db.CreateSubmissionParams{
+				StepInstanceID: step.ID,
+				TaskID:         task.ID,
+				Status:         "DONE",
+				ExitFields:     []byte("{}"),
+			}); createErr != nil {
+				slog.Warn("harness: auto-submission failed", "task_id", taskID, "step_id", uuidToString(step.ID), "error", createErr)
+			} else {
+				slog.Info("harness: auto-submission created", "task_id", taskID, "step_id", uuidToString(step.ID))
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
 }
 

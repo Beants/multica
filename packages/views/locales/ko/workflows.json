@@ -104,6 +104,18 @@
     "nonlinear_warning": "이 템플릿의 그래프는 비선형입니다(분기, 다중 시작점 또는 조건 엣지 포함). 목록 편집기는 노드를 체인 순서로 표시하며, 저장하면 그래프가 선형 체인으로 재작성되고 엣지 조건이 모두 삭제됩니다.",
     "unsaved_changes": "저장하지 않은 변경 사항"
   },
+  "canvas": {
+    "tab_form": "폼",
+    "tab_canvas": "캔버스",
+    "tab_summary": "요약",
+    "node_type_agent": "에이전트",
+    "node_type_acceptance": "승인",
+    "node_type_end": "종료",
+    "empty_selection_hint": "노드를 선택하여 구성을 확인하세요.",
+    "readonly_hint": "캔버스는 읽기 전용입니다. 폼 탭에서 노드를 편집하세요.",
+    "enabled": "활성화됨",
+    "nonlinear_badge": "비선형 그래프"
+  },
   "runs": {
     "title": "워크플로 실행",
     "empty_title": "아직 실행이 없습니다",

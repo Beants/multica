@@ -977,3 +977,68 @@ func TestBuildCommentPromptSameThreadKeepsSingleReply(t *testing.T) {
 		t.Errorf("same-thread run must keep the single --parent=trigger reply cookbook, got:\n%s", out)
 	}
 }
+
+// TestBuildWorkflowPrompt pins the P3-3 KI-5 fix: a task carrying
+// WorkflowStepNodeKey must route through buildWorkflowPrompt and teach the
+// submission protocol — without it, workflow agent nodes fell through to
+// the default assignment prompt (only `multica issue get` + comment) and
+// the run hung on a step that never reached a verdict.
+func TestBuildWorkflowPrompt(t *testing.T) {
+	t.Run("routes via WorkflowStepNodeKey and teaches submission protocol", func(t *testing.T) {
+		task := Task{
+			IssueID:             "issue-789",
+			WorkflowStepNodeKey: "implement",
+			HandoffNote:         "Node-specific scope: implement the foo bar.",
+		}
+		out := BuildPrompt(task, "claude")
+		for _, want := range []string{
+			"WORKFLOW STEP dispatch",
+			`"implement" node`,
+			"multica step context --output json",
+			"multica submission create --status DONE",
+			"--exit-fields",
+			"exit_fields_schema",
+			"multica submission create --status BLOCKED",
+			"Issue comments DO NOT advance the workflow",
+			"Do not run `multica issue comment add`",
+			"Node-specific scope: implement the foo bar.",
+			"multica --help",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("workflow prompt missing %q\n--- output ---\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("does not teach verdict create for agent nodes", func(t *testing.T) {
+		out := buildWorkflowPrompt(Task{WorkflowStepNodeKey: "implement", IssueID: "i1"})
+		// The prompt PROHIBITS verdict create (evaluator-only). It must include
+		// that prohibition and never an affirmative "Run" instruction for it.
+		if !strings.Contains(out, "Do not run `multica verdict create`") {
+			t.Errorf("agent-node workflow prompt must include the verdict-create prohibition, got:\n%s", out)
+		}
+		if strings.Contains(out, "Run `multica verdict create") {
+			t.Errorf("agent-node workflow prompt must NOT affirmatively instruct verdict create, got:\n%s", out)
+		}
+	})
+
+	t.Run("workflow branch wins over default assignment", func(t *testing.T) {
+		// A workflow task with no chat/comment/autopilot/quick-create markers
+		// must NOT fall through to the default assignment opener. The workflow
+		// prompt starts with `multica step context`, never `multica issue get`.
+		task := Task{
+			IssueID:             "issue-1",
+			WorkflowStepNodeKey: "plan",
+		}
+		out := BuildPrompt(task, "claude")
+		if !strings.Contains(out, "WORKFLOW STEP dispatch") {
+			t.Errorf("workflow task did not route to buildWorkflowPrompt, got:\n%s", out)
+		}
+		if strings.Contains(out, "Start by running `multica issue get") {
+			t.Errorf("workflow prompt must not open with the default-assignment `multica issue get` instruction, got:\n%s", out)
+		}
+		if !strings.Contains(out, "Start by running `multica step context --output json`") {
+			t.Errorf("workflow prompt must open with `multica step context`, got:\n%s", out)
+		}
+	})
+}

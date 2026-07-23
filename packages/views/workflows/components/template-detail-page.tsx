@@ -1,10 +1,12 @@
 "use client";
 
-// template-detail-page.tsx — /{slug}/workflows/templates/{id}: the form-based
-// template editor (R7; explicitly NOT a canvas — the node canvas is P3).
-// Drafts edit name/description + the ordered node list inline; publish
-// freezes the graph server-side; published/archived templates render
-// read-only (the server enforces the same rule with 409).
+// template-detail-page.tsx — /{slug}/workflows/templates/{id}: the template
+// editor surface. P0/P1 shipped a form-only chain editor; P3-2 adds a
+// read-only node canvas (React Flow) as a sibling Tab so operators can
+// visualize complex graphs. Drafts edit name/description + the ordered
+// node list inline on the Form tab; publish freezes the graph
+// server-side; published/archived templates render read-only (the server
+// enforces the same rule with 409).
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -37,12 +39,14 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { CollectionPageState } from "../../layout/collection-page";
 import { useT } from "../../i18n";
 import { TemplateStatusBadge } from "./status-badges";
 import { NodeEditorCard, emptyNode, newExitField, type EditableNode } from "./node-editor";
+import { WorkflowCanvas } from "./workflow-canvas";
 
 // Orders the node list by walking the edge chain from the head (the node
 // with no incoming edge). P0 chains are linear; a malformed/broken chain
@@ -303,82 +307,117 @@ function TemplateEditor({
 
   const nonLinear = isNonLinearGraph(template);
 
+  // P3-2: form (default) + canvas tabs coexist. The canvas is read-only —
+  // editing still happens on the form tab. defaultValue="form" keeps the
+  // existing tests (which query form fields without clicking a tab) green.
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-auto p-5">
-      {nonLinear && (
-        <div
-          role="alert"
-          className="flex items-start gap-2 rounded-lg border border-orange-500/40 bg-orange-500/10 p-3 text-xs text-orange-600 dark:text-orange-400"
-        >
-          <AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-          <p>{t(($) => $.detail.nonlinear_warning)}</p>
-        </div>
-      )}
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="wf-tpl-name">{t(($) => $.detail.name_label)}</Label>
-        <Input id="wf-tpl-name" value={name} onChange={(e) => setName(e.target.value)} />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="wf-tpl-desc">{t(($) => $.detail.desc_label)}</Label>
-        <Textarea
-          id="wf-tpl-desc"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={2}
-        />
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-medium">{t(($) => $.detail.nodes_title)}</h2>
-            <p className="text-xs text-muted-foreground">{t(($) => $.detail.nodes_hint)}</p>
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setNodes((prev) => [...prev, emptyNode(prev.length)])}
-          >
-            <Plus aria-hidden="true" className="size-3.5" />
-            {t(($) => $.detail.add_node)}
-          </Button>
-        </div>
-        {nodes.map((node, i) => (
-          <NodeEditorCard
-            key={`${i}-${node.node_key}`}
-            node={node}
-            index={i}
-            total={nodes.length}
-            onChange={(next) => patchNode(i, next)}
-            onMove={moveNode}
-            onRemove={removeNode}
-          />
-        ))}
-      </div>
-
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          onClick={save}
-          disabled={updateTemplate.isPending || name.trim() === "" || !dirty}
-        >
-          {t(($) => $.detail.save)}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={publish}
-          disabled={publishTemplate.isPending}
-        >
-          {t(($) => $.detail.publish)}
-        </Button>
-        {dirty && (
-          <span className="text-xs text-muted-foreground">
-            {t(($) => $.detail.unsaved_changes)}
+    <Tabs
+      defaultValue="form"
+      className="flex flex-1 flex-col gap-0 overflow-hidden"
+    >
+      <div className="flex shrink-0 items-center gap-1 border-b border-border px-3 pt-2">
+        <TabsList variant="line">
+          <TabsTrigger value="form">
+            {t(($) => $.canvas.tab_form)}
+          </TabsTrigger>
+          <TabsTrigger value="canvas">
+            {t(($) => $.canvas.tab_canvas)}
+          </TabsTrigger>
+        </TabsList>
+        {nonLinear && (
+          <span className="ml-2 inline-flex items-center gap-1 text-xs text-orange-600 dark:text-orange-400">
+            <AlertTriangle aria-hidden="true" className="size-3.5" />
+            {t(($) => $.canvas.nonlinear_badge)}
           </span>
         )}
       </div>
-    </div>
+      <TabsContent
+        value="form"
+        className="mt-0 flex flex-1 flex-col overflow-hidden"
+      >
+        <div className="flex flex-1 flex-col gap-4 overflow-auto p-5">
+          {nonLinear && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-lg border border-orange-500/40 bg-orange-500/10 p-3 text-xs text-orange-600 dark:text-orange-400"
+            >
+              <AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+              <p>{t(($) => $.detail.nonlinear_warning)}</p>
+            </div>
+          )}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="wf-tpl-name">{t(($) => $.detail.name_label)}</Label>
+            <Input id="wf-tpl-name" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="wf-tpl-desc">{t(($) => $.detail.desc_label)}</Label>
+            <Textarea
+              id="wf-tpl-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-medium">{t(($) => $.detail.nodes_title)}</h2>
+                <p className="text-xs text-muted-foreground">{t(($) => $.detail.nodes_hint)}</p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setNodes((prev) => [...prev, emptyNode(prev.length)])}
+              >
+                <Plus aria-hidden="true" className="size-3.5" />
+                {t(($) => $.detail.add_node)}
+              </Button>
+            </div>
+            {nodes.map((node, i) => (
+              <NodeEditorCard
+                key={`${i}-${node.node_key}`}
+                node={node}
+                index={i}
+                total={nodes.length}
+                onChange={(next) => patchNode(i, next)}
+                onMove={moveNode}
+                onRemove={removeNode}
+              />
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={save}
+              disabled={updateTemplate.isPending || name.trim() === "" || !dirty}
+            >
+              {t(($) => $.detail.save)}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={publish}
+              disabled={publishTemplate.isPending}
+            >
+              {t(($) => $.detail.publish)}
+            </Button>
+            {dirty && (
+              <span className="text-xs text-muted-foreground">
+                {t(($) => $.detail.unsaved_changes)}
+              </span>
+            )}
+          </div>
+        </div>
+      </TabsContent>
+      <TabsContent
+        value="canvas"
+        className="mt-0 flex-1 overflow-hidden"
+      >
+        <WorkflowCanvas template={template} />
+      </TabsContent>
+    </Tabs>
   );
 }
 
@@ -386,22 +425,46 @@ function TemplateReadonly({ template }: { template: WorkflowTemplateDetail }) {
   const { t } = useT("workflows");
   const nodes = toEditable(template);
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-auto p-5">
-      <p className="text-xs text-muted-foreground">
-        {template.status === "archived"
-          ? t(($) => $.detail.readonly_archived_hint)
-          : t(($) => $.detail.readonly_published_hint)}
-      </p>
-      {template.description !== "" && (
-        <p className="text-sm text-muted-foreground">{template.description}</p>
-      )}
-      <div className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium">{t(($) => $.detail.nodes_title)}</h2>
-        {nodes.map((node, i) => (
-          <NodeSummary key={`${i}-${node.node_key}`} node={node} index={i} />
-        ))}
+    <Tabs
+      defaultValue="summary"
+      className="flex flex-1 flex-col gap-0 overflow-hidden"
+    >
+      <div className="flex shrink-0 items-center gap-1 border-b border-border px-3 pt-2">
+        <TabsList variant="line">
+          <TabsTrigger value="summary">
+            {t(($) => $.canvas.tab_summary)}
+          </TabsTrigger>
+          <TabsTrigger value="canvas">
+            {t(($) => $.canvas.tab_canvas)}
+          </TabsTrigger>
+        </TabsList>
       </div>
-    </div>
+      <TabsContent
+        value="summary"
+        className="mt-0 flex flex-1 flex-col overflow-auto p-5"
+      >
+        <p className="text-xs text-muted-foreground">
+          {template.status === "archived"
+            ? t(($) => $.detail.readonly_archived_hint)
+            : t(($) => $.detail.readonly_published_hint)}
+        </p>
+        {template.description !== "" && (
+          <p className="text-sm text-muted-foreground">{template.description}</p>
+        )}
+        <div className="flex flex-col gap-2">
+          <h2 className="text-sm font-medium">{t(($) => $.detail.nodes_title)}</h2>
+          {nodes.map((node, i) => (
+            <NodeSummary key={`${i}-${node.node_key}`} node={node} index={i} />
+          ))}
+        </div>
+      </TabsContent>
+      <TabsContent
+        value="canvas"
+        className="mt-0 flex-1 overflow-hidden"
+      >
+        <WorkflowCanvas template={template} />
+      </TabsContent>
+    </Tabs>
   );
 }
 

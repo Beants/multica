@@ -339,10 +339,23 @@ type AgentTaskResponse struct {
 	QuickCreateDueDate       string                 `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
 	QuickCreateAttachmentIDs []string               `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
 	HandoffNote              string                 `json:"handoff_note,omitempty"`                // assignment handoff instruction; rendered into the run's opening prompt + issue_context.md (omitempty so old daemons ignore it)
-	SquadID                  string                 `json:"squad_id,omitempty"`                    // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
-	SquadName                string                 `json:"squad_name,omitempty"`                  // display name for the picker squad
-	ParentIssueID            string                 `json:"parent_issue_id,omitempty"`             // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
-	ParentIssueIdentifier    string                 `json:"parent_issue_identifier,omitempty"`     // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
+	// WorkflowStepNodeKey is non-empty when this task was dispatched by a
+	// workflow_run activating an agent node (see workflow/activate.go).
+	// It carries the step's node_key (e.g. "plan", "implement", "review")
+	// so the daemon's BuildPrompt can route to the workflow-specific prompt
+	// that teaches the submission protocol. Empty for every non-workflow
+	// task kind. Resolved at claim time via GetStepInstanceByTask.
+	WorkflowStepNodeKey   string `json:"workflow_step_node_key,omitempty"`  // workflow agent-node dispatch marker; selects the submission-aware prompt
+	// WorkflowStepRole is non-empty when this task was dispatched by a
+	// workflow_run activating an agent node. It carries the node's role
+	// (e.g. "executor", "evaluator") so the daemon can teach evaluator
+	// nodes to submit verdicts. Empty for every non-workflow task kind.
+	// Resolved at claim time via GetStepInstanceByTask + workflow_node lookup.
+	WorkflowStepRole      string `json:"workflow_step_role,omitempty"`      // workflow agent-node role; teaches evaluator nodes to submit verdicts
+	SquadID               string `json:"squad_id,omitempty"`                // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
+	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad
+	ParentIssueID         string `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
+	ParentIssueIdentifier string `json:"parent_issue_identifier,omitempty"` // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and

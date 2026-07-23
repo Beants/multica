@@ -68,6 +68,7 @@ export function TemplateListPage() {
             <Button
               size="sm"
               variant="outline"
+              nativeButton={false}
               render={<AppLink href={p.workflowRuns()} />}
             >
               <Play aria-hidden="true" className="size-3.5" />
@@ -76,6 +77,7 @@ export function TemplateListPage() {
             <Button
               size="sm"
               variant="outline"
+              nativeButton={false}
               render={<AppLink href={p.workflowHooks()} />}
             >
               <Webhook aria-hidden="true" className="size-3.5" />

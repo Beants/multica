@@ -104,6 +104,18 @@
     "nonlinear_warning": "このテンプレートのグラフは非線形です（分岐、複数のヘッド、または条件付きエッジ）。リストエディタはノードをチェーン順で表示します。保存するとグラフが線形チェーンに書き換えられ、エッジ条件はすべて失われます。",
     "unsaved_changes": "未保存の変更"
   },
+  "canvas": {
+    "tab_form": "フォーム",
+    "tab_canvas": "キャンバス",
+    "tab_summary": "サマリー",
+    "node_type_agent": "エージェント",
+    "node_type_acceptance": "承認",
+    "node_type_end": "終了",
+    "empty_selection_hint": "ノードを選択すると設定を確認できます。",
+    "readonly_hint": "キャンバスは読み取り専用です。フォームタブでノードを編集してください。",
+    "enabled": "有効",
+    "nonlinear_badge": "非線形グラフ"
+  },
   "runs": {
     "title": "ワークフロー実行",
     "empty_title": "実行がまだありません",

@@ -104,6 +104,18 @@
     "nonlinear_warning": "该模板的图是非线性的（存在分支、多个入口或条件边）。列表编辑器按链路顺序展示节点——保存将把图重写为线性链，并丢失所有边条件。",
     "unsaved_changes": "有未保存的更改"
   },
+  "canvas": {
+    "tab_form": "表单",
+    "tab_canvas": "画布",
+    "tab_summary": "摘要",
+    "node_type_agent": "Agent",
+    "node_type_acceptance": "验收",
+    "node_type_end": "结束",
+    "empty_selection_hint": "选择一个节点以查看其配置。",
+    "readonly_hint": "画布为只读。请在表单页签中编辑节点。",
+    "enabled": "已启用",
+    "nonlinear_badge": "非线性图"
+  },
   "runs": {
     "title": "工作流运行",
     "empty_title": "还没有运行",

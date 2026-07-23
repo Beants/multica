@@ -104,6 +104,18 @@
     "nonlinear_warning": "This template's graph is non-linear (branching, multiple heads, or conditional edges). The list editor shows nodes in chain order — saving will rewrite the graph as a linear chain and drop any edge conditions.",
     "unsaved_changes": "Unsaved changes"
   },
+  "canvas": {
+    "tab_form": "Form",
+    "tab_canvas": "Canvas",
+    "tab_summary": "Summary",
+    "node_type_agent": "Agent",
+    "node_type_acceptance": "Acceptance",
+    "node_type_end": "End",
+    "empty_selection_hint": "Select a node to inspect its configuration.",
+    "readonly_hint": "Canvas is read-only. Edit nodes on the Form tab.",
+    "enabled": "Enabled",
+    "nonlinear_badge": "Non-linear graph"
+  },
   "runs": {
     "title": "Workflow runs",
     "empty_title": "No runs yet",

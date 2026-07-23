@@ -27,6 +27,15 @@ func BuildPrompt(task Task, provider string) string {
 	if task.QuickCreatePrompt != "" {
 		return buildQuickCreatePrompt(task)
 	}
+	// Workflow agent-node task (P3-3 KI-5): the server stamped
+	// WorkflowStepNodeKey from step_instance.agent_task_id at claim time.
+	// Route to the submission-aware workflow prompt BEFORE the default
+	// assignment branch — otherwise workflow agents fall through to the
+	// `multica issue get` + comment prompt, never learn the submission
+	// protocol, and the run hangs on a step that never reaches a verdict.
+	if task.WorkflowStepNodeKey != "" {
+		return buildWorkflowPrompt(task)
+	}
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
@@ -458,5 +467,61 @@ func buildAutopilotPrompt(task Task) string {
 		b.WriteString("Complete the instructions above.\n")
 	}
 	b.WriteString("Do not run `multica issue get`; this run does not have an issue ID.\n")
+	return b.String()
+}
+
+// buildWorkflowPrompt constructs the prompt for a task dispatched by a
+// workflow_run activating an agent node (P3-3 KI-5). The server stamped
+// WorkflowStepNodeKey from step_instance.agent_task_id at claim time; here
+// we teach the agent the submission protocol so it advances the workflow
+// instead of stalling on a step that never reaches a verdict. The
+// node-specific instructions and upstream exit fields are NOT inlined here
+// — they live on the step's handoff note (already rendered into
+// issue_context.md by execenv) and on `multica step context`. The prompt's
+// job is to point at those and explain how to terminate correctly.
+//
+// Why this branch exists: without it, workflow agent tasks fell through to
+// the default assignment prompt, which only teaches `multica issue get` +
+// comment. Agents had no way to learn the submission protocol without
+// per-agent instruction rewrites, so completed work landed as a comment
+// and the step hung `blocked` forever (KI-5 root cause #1).
+func buildWorkflowPrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
+	b.WriteString("⚠️ This task is a WORKFLOW STEP dispatch.\n\n")
+	fmt.Fprintf(&b, "You are executing the %q node of a workflow run. This is NOT a standalone issue task — the workflow engine is waiting on your step's submission to advance the run, and only `multica submission create` satisfies it.\n\n", task.WorkflowStepNodeKey)
+	if task.IssueID != "" {
+		fmt.Fprintf(&b, "Your assigned issue ID is: %s\n", task.IssueID)
+		fmt.Fprintf(&b, "Start by running `multica step context --output json` to read the node contract — your node's instructions, the upstream node's exit_fields (its handed-off work), and this node's exit_fields_schema (the keys YOUR submission must produce). Then run `multica issue get %s --output json` only if you need the issue body.\n\n", task.IssueID)
+	} else {
+		b.WriteString("Start by running `multica step context --output json` to read the node contract — your node's instructions, the upstream node's exit_fields (its handed-off work), and this node's exit_fields_schema (the keys YOUR submission must produce).\n\n")
+	}
+	// Handoff note carries the engine-assembled node instructions + upstream
+	// exit_fields (workflow/rework.go + activate.go buildHandoffNote). Render
+	// it as the scoping instruction for this node, not a comment to reply to.
+	if task.HandoffNote != "" {
+		b.WriteString("Node handoff (scoping instruction for this step — follow it before doing anything broader, and do not reply to it as if it were a comment):\n\n")
+		fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
+	}
+	b.WriteString("Completion protocol — you MUST end every run with exactly ONE of these:\n\n")
+	b.WriteString("- DONE (work complete, advance the run):\n")
+	b.WriteString("  `multica submission create --status DONE --exit-fields '<json>' --summary \"<one-paragraph summary of what you delivered>\"`\n\n")
+	b.WriteString("  The `--exit-fields` JSON MUST satisfy the node's exit_fields_schema returned by `multica step context`. Use the schema keys verbatim; missing required keys or extra keys both fail the submission. When the schema is empty `{}`, pass `--exit-fields '{}'`.\n\n")
+	b.WriteString("- BLOCKED (cannot make progress — missing input, upstream artifact is wrong, environment failure):\n")
+	b.WriteString("  `multica submission create --status BLOCKED --summary \"<what is blocking you and what you need to unblock>\"`\n\n")
+	b.WriteString("  Do NOT use BLOCKED to flag an unfinished WIP — only use it when you genuinely cannot move forward without external input. A rework loop is the engine's job, not yours.\n\n")
+	b.WriteString("Hard rules:\n\n")
+	b.WriteString("- Issue comments DO NOT advance the workflow. Posting `Done.` or a summary as a comment leaves your step in `running` and the run eventually times out. The ONLY signal the engine accepts is `multica submission create`.\n")
+	b.WriteString("- Do not run `multica issue comment add` to deliver your final result. The submission's `--summary` and `--exit-fields` ARE the delivery — the engine propagates them to downstream nodes and surfaces them in the run timeline.\n")
+	if task.WorkflowStepRole == "evaluator" {
+		b.WriteString("- You are an EVALUATOR-role node. After submitting your verdict via `multica submission create`, you MUST also submit a verdict via `multica verdict create`:\n")
+		b.WriteString("  `multica verdict create --submission-id <submission-id> --result APPROVED --summary \"<verdict summary>\"`\n")
+		b.WriteString("  The verdict is what advances the workflow for evaluator nodes. Without it, the step remains `dispatched` even after submission.\n")
+	} else {
+		b.WriteString("- Do not run `multica verdict create`; verdicts are produced by evaluator-role nodes (gate/acceptance), not by executor agent nodes. Your agent node terminates via submission.\n")
+	}
+	b.WriteString("- If `multica submission create` returns a non-2xx status, read the error, fix the inputs (usually exit_fields schema mismatch), and retry. A 409 on a duplicate submission means the step is already terminal — exit cleanly without further writes.\n")
+	b.WriteString("- If `multica submission create` is absent from your CLI (`multica --help` does not list it), your installed `multica` is older than v0.4.4. Stop and report this in a comment — do NOT fall back to delivering the result via comment; the run cannot advance that way.\n\n")
+	fmt.Fprintf(&b, "Node: %s. Issue: %s. Produce a submission that matches the exit_fields_schema, then exit.\n", task.WorkflowStepNodeKey, task.IssueID)
 	return b.String()
 }

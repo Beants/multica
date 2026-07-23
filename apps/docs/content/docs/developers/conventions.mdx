@@ -72,6 +72,10 @@ If logic appears in both apps, it MUST be extracted to a shared package. There a
 
 Every issue has a human-readable key like `MUL-123`: workspace `issue_prefix` (uppercase letters and digits, typically 3 chars, max 10) + sequence number. Workspace admins can change the prefix in Settings → General; changing it renumbers every existing issue, so external references that embed the old prefix (PR titles, branch names, links in docs and chat) stop resolving.
 
+### Workflow agent selectors
+
+Workflow templates reference agents by `agent_selector`, resolved at publish by **exact `agent.name` match** (`server/internal/workflow/template.go` `resolveAgent`). The seed templates (`multica workflow seed`) use fixed selectors `workflow-planner` / `workflow-implementer` / `workflow-reviewer` (`seed.go` `DefaultSeed*Agent`). A workspace running the standard seed template must therefore create agents whose `name` is exactly one of those — any other name (e.g. `planner`) fails publish with `agent selector does not resolve to a workspace agent`. Custom templates may use any selector as long as a same-named agent exists.
+
 ### Comments in code
 
 English only. The repo enforces this for both Go and TypeScript. If you find a Chinese comment in code, it's a bug — replace it.

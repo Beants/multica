@@ -87,6 +87,20 @@ func registerWorkflowRoutes(r chi.Router, h *handler.Handler, authMW func(http.H
 			r.Post("/{id}/disable", hookH.DisableHook)
 		})
 
+		// Gate script registry (KI-4): workspace-scoped scripts referenced by
+		// gate nodes via node.config.gate_script_ref. Same RequireHumanActor
+		// posture as templates/hooks — team governance, not agent self-service.
+		gateH := handler.NewWorkflowGateScriptHandler(h.Queries)
+		r.Route("/api/workflow-gate-scripts", func(r chi.Router) {
+			r.Use(handler.RequireHumanActor)
+			r.Post("/", gateH.CreateGateScript)
+			r.Get("/", gateH.ListGateScripts)
+			r.Route("/{id}", func(r chi.Router) {
+				r.Put("/", gateH.UpdateGateScript)
+				r.Delete("/", gateH.DeleteGateScript)
+			})
+		})
+
 		// Run inspection + acceptance decisions. The acceptance endpoints are
 		// the control plane the verdict actor model exists to protect — an
 		// executor agent must never approve its own work.
